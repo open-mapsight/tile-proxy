@@ -4,23 +4,6 @@ declare(strict_types=1);
 namespace OpenMapsight\TileProxy;
 
 use RuntimeException;
-use function dirname;
-use function file_put_contents;
-use function imageAlphaBlending;
-use function imageBmp;
-use function imageCreateFromString;
-use function imageGif;
-use function imageJpeg;
-use function imagePaletteToTrueColor;
-use function imagePng;
-use function imageSaveAlpha;
-use function imageWebP;
-use function is_dir;
-use function mkdir;
-use function ob_end_clean;
-use function ob_get_contents;
-use function ob_start;
-use function preg_replace;
 
 class Utils
 {

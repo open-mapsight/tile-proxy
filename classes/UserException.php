@@ -3,8 +3,8 @@ declare(strict_types=1);
 
 namespace OpenMapsight\TileProxy;
 
-use Exception;
+use RuntimeException;
 
-class UserException extends Exception
+class UserException extends RuntimeException
 {
 }

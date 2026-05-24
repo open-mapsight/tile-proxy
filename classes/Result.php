@@ -4,9 +4,6 @@ declare(strict_types=1);
 namespace OpenMapsight\TileProxy;
 
 use Exception;
-use function file_get_contents;
-use function filemtime;
-use function time;
 
 class Result
 {

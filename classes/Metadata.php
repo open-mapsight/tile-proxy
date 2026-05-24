@@ -3,11 +3,6 @@ declare(strict_types=1);
 
 namespace OpenMapsight\TileProxy;
 
-use function file_get_contents;
-use function file_put_contents;
-use function json_decode;
-use function json_encode;
-
 class Metadata
 {
     private mixed $data = null;
