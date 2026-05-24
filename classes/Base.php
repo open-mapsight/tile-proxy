@@ -5,18 +5,6 @@ namespace OpenMapsight\TileProxy;
 
 use RuntimeException;
 use Throwable;
-use function assert;
-use function call_user_func;
-use function dirname;
-use function file_get_contents;
-use function flock;
-use function fopen;
-use function strlen;
-use function strtotime;
-use function usleep;
-use const LOCK_EX;
-use const LOCK_NB;
-use const LOCK_UN;
 
 class Base
 {
@@ -133,6 +121,7 @@ class Base
         }
     }
 
+    /** @return array<string, string> */
     protected static function getReqArgs(array $cfg): array
     {
         $prefix = (static function () use ($cfg) {
@@ -152,10 +141,10 @@ class Base
         })();
 
         return [
-            'x' => (int)$_GET['x'],
-            'y' => (int)$_GET['y'],
-            'z' => (int)$_GET['z'],
-            'prefix' => $prefix,
+            'x' => (string)$_GET['x'],
+            'y' => (string)$_GET['y'],
+            'z' => (string)$_GET['z'],
+            'prefix' => (string)$prefix,
         ];
     }
 

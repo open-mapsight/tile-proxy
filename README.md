@@ -1,26 +1,72 @@
 # Tile proxy
 
-## Options
+Tile proxy is a PHP-based server for processing and caching tiles.
 
-* ***defaultPrefix***: `string`
-* ***localPrefixes***: `list<string>`
-* ***suffix***: `string`, file name extension (eg. ".png")
-* ***mimeType***: `string`, mime type of the image
-* ***oldCachePath***: `bool`
-* ***cacheDirectoryPath***: `string`
-* ***remoteTilesBaseUrls***: `list<string>`
-* ***localTilesBaseUrl***: `string`
-* ***ttl***: `int`, cache time-to-live in seconds
-* ***cachingEnabled***: `bool`, we need *cacheDirectoryPath* even if caching is disabled,
-  it's used as a tmp dir in that case.
-* ***remoteTilesMap***: `string`, an image map method that is used to alter the downloaded tile,
-  allowed values:
-    * "none": default
-    * "reducedSaturation"
-    * "bremen"
-    * "knacht"
-* ***streamContext***: `map<any, any>`, is used in the context of downloading remote and local
-  tiles and gets passed to `stream_context_create`. Can be used to configure a http proxy.
+## Usage
+
+You can initialize the proxy by providing a configuration array or by pointing to a JSONC (JSON with comments) configuration file.
+
+### Initialization
+
+#### Using JSONC Configuration
+```php
+use OpenMapsight\TileProxy\Base;
+
+Base::runFromJsonConfigFile('/path/to/config.jsonc');
+```
+
+#### Using Array Configuration
+```php
+use OpenMapsight\TileProxy\Base;
+
+$config = [
+    // ... configuration ...
+];
+
+Base::run($config);
+```
+
+## Configuration
+
+The configuration defines the behavior of the proxy.
+
+* `cacheServerPath`: Base directory for caching tiles.
+* `ops`: A list of operations to perform on the tiles.
+* `debug`: (Optional) If set to `true`, outputs exceptions in the browser.
+* `prefixArgName`: (Optional) Name of the GET parameter to use for prefixing (e.g., to support different map styles).
+* `allowedPrefixes`: (Optional) List of allowed values for the prefix argument.
+
+### Operation Pipeline (Chaining)
+
+Operations are chained sequentially as defined in the `ops` array. The first operation must be the `src` operation, which defines the source URL(s).
+
+```jsonc
+"ops": [
+    {
+        "cacheServerName": "source-1",
+        "urls": ["https://example.com/tiles/{z}/{x}/{y}.png"],
+        "mimeType": "image/png",
+        "cacheBrowserTtl": 3600,
+        "cacheServerTtl": 86400
+    },
+    {
+        "op": "colorFilter",
+        "filter": "reducedSaturation",
+        "cacheServerName": "filter-1"
+    },
+    {
+        "op": "imgOpt",
+        "cacheServerName": "opt-1"
+    }
+]
+```
+
+### Available Operations
+
+* `src`: Fetches the tile from the defined `urls`. Supports `{z}`, `{x}`, `{y}`, and `{prefix}` placeholders.
+* `colorFilter`: Applies color filters. Supported filters: `reducedSaturation`, `muted`, `culture`.
+* `imgOpt`: Optimizes the image using image optimizers.
+* `merge`: Merges the current tile with another set of operations.
 
 ## Development
 

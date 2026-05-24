@@ -21,7 +21,7 @@ class Processor
             $data = (static function () use ($cfg, $res) {
                 return match ($cfg['filter']) {
                     'reducedSaturation' => OpColorFilterUtils::reducedSaturation($res->getData()),
-                    'bremen' => OpColorFilterUtils::muted($res->getData()),
+                    'muted' => OpColorFilterUtils::muted($res->getData()),
                     'culture' => OpColorFilterUtils::manipulatePixelsHsl(
                         $res->getData(),
                         static function ($h, $s, $l) {
@@ -248,15 +248,19 @@ class Processor
 
     protected static function getSrcUrl(array $cfg, Result $res): string
     {
-        $reqArgs = $res->getReqArgs();
+        if (empty($cfg['urls'])) {
+            throw new RuntimeException('No urls configured');
+        }
+
         $url = $cfg['urls'][array_rand($cfg['urls'])];
 
+        $reqArgs = $res->getReqArgs();
         if ($reqArgs['prefix'] !== null) {
             $url = str_replace('{prefix}', $reqArgs['prefix'], $url);
         }
 
-        $url = str_replace('{z}', $reqArgs['z'], $url);
-        $url = str_replace('{x}', $reqArgs['x'], $url);
-        return str_replace('{y}', $reqArgs['y'], $url);
+        $url = str_replace('{z}', (string)$reqArgs['z'], $url);
+        $url = str_replace('{x}', (string)$reqArgs['x'], $url);
+        return str_replace('{y}', (string)$reqArgs['y'], $url);
     }
 }
