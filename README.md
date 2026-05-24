@@ -21,3 +21,19 @@
     * "knacht"
 * ***streamContext***: `map<any, any>`, is used in the context of downloading remote and local
   tiles and gets passed to `stream_context_create`. Can be used to configure a http proxy.
+
+## Development
+
+### Testing
+
+To run the tests, use:
+
+```bash
+composer test
+```
+
+Or run PHPUnit directly:
+
+```bash
+vendor/bin/phpunit
+```

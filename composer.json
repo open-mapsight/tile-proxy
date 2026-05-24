@@ -21,23 +21,20 @@
         "source": "https://github.com/open-mapsight/mapsight-tile-proxy"
     },
     "require": {
-        "php": "^8.2",
-        "symfony/polyfill-php83": "^1.37",
-        "symfony/polyfill-php84": "^1.37",
-        "symfony/polyfill-php85": "^1.37",
         "ext-gd": "*",
         "ext-json": "*",
         "ext-imagick": "*",
-        "spatie/image-optimizer": "^1.2"
+        "php": "^8.2.0",
+        "spatie/image-optimizer": "^1.8.1",
+        "symfony/polyfill-php83": "^1.37.0",
+        "symfony/polyfill-php84": "^1.37.0",
+        "symfony/polyfill-php85": "^1.37.0"
     },
     "scripts": {
         "test": "phpunit"
     },
     "config": {
-        "sort-packages": true,
-        "allow-plugins": {
-            "php-http/discovery": true
-        }
+        "sort-packages": true
     },
     "minimum-stability": "dev",
     "prefer-stable": true,
@@ -50,6 +47,11 @@
     "autoload": {
         "psr-4": {
             "OpenMapsight\\TileProxy\\": "classes"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "OpenMapsight\\TileProxy\\Tests\\": "tests"
         }
     },
     "archive": {
