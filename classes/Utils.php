@@ -1,0 +1,119 @@
+<?php
+declare(strict_types=1);
+
+namespace OpenMapsight\TileProxy;
+
+use RuntimeException;
+use function dirname;
+use function file_put_contents;
+use function imageAlphaBlending;
+use function imageBmp;
+use function imageCreateFromString;
+use function imageGif;
+use function imageJpeg;
+use function imagePaletteToTrueColor;
+use function imagePng;
+use function imageSaveAlpha;
+use function imageWebP;
+use function is_dir;
+use function mkdir;
+use function ob_end_clean;
+use function ob_get_contents;
+use function ob_start;
+use function preg_replace;
+
+class Utils
+{
+    public const SUPPORTED_IMAGE_MIME_TYPES = [
+        'image/bmp',
+        'image/x-bmp',
+        'image/gif',
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+    ];
+
+    public static function parseJsoncString($str)
+    {
+        // support jsonc; remove comments
+        // https://www.php.net/manual/en/function.json-decode.php#112735
+        $str = preg_replace(
+            '#(/\*([^*]|[\r\n]|(\*+([^*/]|[\r\n])))*\*+/)|([\s\t]//.*)|(^//.*)#',
+            '',
+            $str
+        );
+
+        return json_decode($str, true);
+    }
+
+    public static function assertImageMimeType(string $mimeType): void
+    {
+        $found = in_array(
+            $mimeType,
+            Utils::SUPPORTED_IMAGE_MIME_TYPES,
+            true
+        );
+
+        if (!$found) {
+            throw new RuntimeException('Unsupported image mime type: "' . $mimeType . '"');
+        }
+    }
+
+    public static function bytesToImage(string $data)
+    {
+        $img = imageCreateFromString($data);
+        imagePaletteToTrueColor($img);
+        imageSaveAlpha($img, true);
+        imageAlphaBlending($img, true);
+        return $img;
+    }
+
+    public static function imageToBytes(string $mimeType, $img): string
+    {
+        ob_start();
+        try {
+            switch ($mimeType) {
+                case 'image/bmp':
+                case 'image/x-bmp':
+                    imageBmp($img);
+                    break;
+
+                case 'image/gif':
+                    imageGif($img);
+                    break;
+
+                case 'image/jpeg':
+                    imageJpeg($img);
+                    break;
+
+
+                case 'image/png':
+                    imagePng($img);
+                    break;
+
+                case 'image/webp':
+                    imageWebP($img);
+                    break;
+
+                default:
+                    throw new RuntimeException('Unsupported image mime type: "' . $mimeType . '"');
+            }
+            return ob_get_contents();
+        } finally {
+            ob_end_clean();
+        }
+    }
+
+    public static function writeToFile(string $path, string $data): void
+    {
+        self::mkdirp(dirname($path));
+        @file_put_contents($path, $data);
+    }
+
+    public static function mkdirp($pathDir): void
+    {
+        if (!@mkdir($pathDir, 0777, true) && !is_dir($pathDir)) {
+            throw new RuntimeException('Directory "' . $pathDir . '" was not created');
+        }
+    }
+}

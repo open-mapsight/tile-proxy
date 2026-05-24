@@ -1,0 +1,68 @@
+{
+    "name": "mapsight/tile-proxy",
+    "description": "Simple tile proxy",
+    "type": "library",
+    "keywords": [
+        "mapsight",
+        "tiles",
+        "osm"
+    ],
+    "homepage": "https://github.com/open-mapsight/mapsight-tile-proxy",
+    "license": "proprietary",
+    "authors": [
+        {
+            "name": "Paul Golmann",
+            "email": "mail@pje-web.de",
+            "role": "Developer"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/open-mapsight/mapsight-tile-proxy/issues",
+        "source": "https://github.com/open-mapsight/mapsight-tile-proxy"
+    },
+    "require": {
+        "php": "^8.2",
+        "symfony/polyfill-php83": "^1.37",
+        "symfony/polyfill-php84": "^1.37",
+        "symfony/polyfill-php85": "^1.37",
+        "ext-gd": "*",
+        "ext-json": "*",
+        "ext-imagick": "*",
+        "spatie/image-optimizer": "^1.2"
+    },
+    "scripts": {
+        "test": "phpunit"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "php-http/discovery": true
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "require-dev": {
+        "roave/security-advisories": "dev-master",
+        "friendsofphp/php-cs-fixer": "^3.95",
+        "phpunit/phpunit": "^11.0",
+        "rector/rector": "^2.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "OpenMapsight\\TileProxy\\": "classes"
+        }
+    },
+    "archive": {
+        "exclude": [
+            "*",
+            ".*",
+            "!/classes/*"
+        ]
+    },
+    "platform": {
+        "php": "^8.2.99",
+        "ext-gd": "*",
+        "ext-json": "*",
+        "ext-imagick": "*"
+    }
+}
