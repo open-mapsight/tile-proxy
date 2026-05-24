@@ -85,6 +85,10 @@ class Processor
             $res->getMetadata()
         );
 
+        if ($subRes->failure !== null) {
+            return $next($res);
+        }
+
         $subRes->checkpointCache();
 
         Utils::assertImageMimeType($subRes->mimeType);

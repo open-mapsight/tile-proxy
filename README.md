@@ -68,6 +68,36 @@ Operations are chained sequentially as defined in the `ops` array. The first ope
 * `imgOpt`: Optimizes the image using image optimizers.
 * `merge`: Merges the current tile with another set of operations.
 
+## Examples
+
+### Layering Tiles
+
+You can layer tiles by using the `merge` operation to overlay another tile set on top of the base map. If the overlay request fails (e.g., returns a 404), the merge operation is skipped and the base tile is returned.
+
+```jsonc
+"ops": [
+    {
+        "cacheServerName": "base-map",
+        "urls": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+        "mimeType": "image/png",
+        "cacheBrowserTtl": 3600,
+        "cacheServerTtl": 86400
+    },
+    {
+        "op": "merge",
+        "ops": [
+            {
+                "cacheServerName": "overlay",
+                "urls": ["https://overlay.example.com/{z}/{x}/{y}.png"],
+                "mimeType": "image/png",
+                "cacheBrowserTtl": 3600,
+                "cacheServerTtl": 86400
+            }
+        ]
+    }
+]
+```
+
 ## Development
 
 ### Testing
