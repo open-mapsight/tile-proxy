@@ -137,6 +137,10 @@ class Processor
 
         foreach (array_reverse($ops, true) as $i => $opCfg) {
             if ($i === 0) {
+                if (!isset($opCfg['cacheServerName'])) {
+                    throw new RuntimeException('Missing `cacheServerName` in operation configuration');
+                }
+
                 // it's the first op... run it and the rest of the pipeline
                 $res = new Result(
                     $reqArgs,
