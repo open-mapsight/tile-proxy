@@ -1,0 +1,7 @@
+# Exclude tests and development configuration from distributed archives
+tests/          export-ignore
+phpunit.xml     export-ignore
+.phpunit.cache/ export-ignore
+.github/        export-ignore
+.editorconfig   export-ignore
+.idea/          export-ignore
