@@ -68,6 +68,73 @@ Operations are chained sequentially as defined in the `ops` array. The first ope
 * `imgOpt`: Optimizes the image using image optimizers.
 * `merge`: Merges the current tile with another set of operations.
 
+## Mapbox Style Vector Proxy
+
+`MapboxStyleProxy` proxies named Mapbox/MapLibre style assets through same-origin URLs. It rewrites style JSON
+references for TileJSON, vector tiles, sprites, and glyphs, resolves relative asset URLs, then fetches only allow-listed
+upstream URLs on demand.
+
+```php
+use OpenMapsight\TileProxy\MapboxStyleProxy;
+
+$response = MapboxStyleProxy::handleRequest($config, $_SERVER['REQUEST_URI']);
+
+header('Content-Type: ' . $response->mimeType);
+if ($response->cacheBrowserTtl !== null) {
+    header('Cache-Control: public, max-age=' . $response->cacheBrowserTtl);
+}
+echo $response->data;
+```
+
+Example configuration:
+
+```jsonc
+{
+    "cacheServerPath": "/var/cache/mapsight-tile-proxy",
+    "publicBasePath": "/map-assets",
+    "styles": {
+        "city-default": {
+            "upstreamStyleUrl": "https://example.com/styles/base.json",
+            "allowedHosts": ["example.com"],
+            "allowedPathPrefixes": [
+                "/styles/",
+                "/tiles/",
+                "/sprites/",
+                "/fonts/"
+            ],
+            "cacheTtls": {
+                "style": 86400,
+                "tilejson": 86400,
+                "tile": 604800,
+                "sprite": 2592000,
+                "glyph": 2592000
+            },
+            "transforms": [
+                { "op": "removeLayersById", "ids": ["duplicate-poi-layer"] },
+                { "op": "removeLayersByIdContains", "contains": "RailTrack" }
+            ],
+            "attribution": "City map attribution, Darstellung verandert"
+        }
+    }
+}
+```
+
+Request the proxied style at:
+
+```text
+/map-assets/styles/city-default.json
+```
+
+Generated asset routes use the same base path:
+
+```text
+/map-assets/tilejson/{styleName}/{sourceName}.json
+/map-assets/tiles/{styleName}/{sourceName}/{tileIndex}/{z}/{x}/{y}.pbf
+/map-assets/sprites/{styleName}/{encodedSpriteUrl}.json
+/map-assets/sprites/{styleName}/{encodedSpriteUrl}.png
+/map-assets/glyphs/{styleName}/{encodedGlyphTemplate}/{fontstack}/{range}.pbf
+```
+
 ## Examples
 
 ### Layering Tiles
@@ -112,4 +179,11 @@ Or run PHPUnit directly:
 
 ```bash
 vendor/bin/phpunit
+```
+
+The basemap.de integration test is skipped by default because it depends on the live upstream service. Run it explicitly
+with:
+
+```bash
+RUN_BASEMAPDE_INTEGRATION_TESTS=1 vendor/bin/phpunit tests/BasemapDeIntegrationTest.php
 ```
