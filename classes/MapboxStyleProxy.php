@@ -17,6 +17,8 @@ class MapboxStyleProxy
 
     public static function handleRequest(array $cfg, string $requestPath): MapboxStyleProxyResponse
     {
+        Log::configureFromConfig($cfg);
+
         $publicBasePath = rtrim((string)($cfg['publicBasePath'] ?? ''), '/');
         $routePath = self::stripPublicBasePath($requestPath, $publicBasePath);
 

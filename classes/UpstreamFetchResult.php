@@ -10,6 +10,7 @@ class UpstreamFetchResult
         public readonly ?int    $statusCode,
         public readonly bool    $transportFailed,
         public readonly bool    $contentTypeMismatch = false,
+        public readonly ?string $error = null,
     )
     {
     }

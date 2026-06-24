@@ -27,6 +27,8 @@ class Base
         string $processorClass = Processor::class
     ): void
     {
+        Log::configureFromConfig($cfg);
+
         try {
             $reqArgs = static::getReqArgs($cfg);
             $cachePath = static::getCachePath($cfg, $reqArgs);

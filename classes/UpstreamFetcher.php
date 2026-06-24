@@ -23,7 +23,9 @@ class UpstreamFetcher
         if (parse_url($url, PHP_URL_SCHEME) === 'file') {
             $content = @file_get_contents($url);
             if ($content === false) {
-                return new UpstreamFetchResult(null, null, true);
+                self::logWarning('Upstream file read failed', ['url' => $url]);
+
+                return new UpstreamFetchResult(null, null, true, false, 'file read failed');
             }
 
             return new UpstreamFetchResult($content, 200, false);
@@ -49,13 +51,39 @@ class UpstreamFetcher
                 $expectedContentType !== null
                 && !self::matchesContentType($contentType, $expectedContentType)
             ) {
-                return new UpstreamFetchResult(null, $statusCode, false, true);
+                self::logWarning('Upstream content type mismatch', [
+                    'url' => $url,
+                    'expected' => $expectedContentType,
+                    'actual' => $contentType,
+                    'statusCode' => $statusCode,
+                ]);
+
+                return new UpstreamFetchResult(
+                    null,
+                    $statusCode,
+                    false,
+                    true,
+                    'content type mismatch'
+                );
             }
 
             return new UpstreamFetchResult((string)$response->getBody(), $statusCode, false);
-        } catch (GuzzleException) {
-            return new UpstreamFetchResult(null, null, true);
+        } catch (GuzzleException $e) {
+            self::logWarning('Upstream fetch failed', [
+                'url' => $url,
+                'error' => $e->getMessage(),
+            ]);
+
+            return new UpstreamFetchResult(null, null, true, false, $e->getMessage());
         }
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     */
+    private static function logWarning(string $message, array $context = []): void
+    {
+        Log::warning($message, $context);
     }
 
     public static function matchesContentType(string $header, string $expected): bool

@@ -33,6 +33,7 @@ The configuration defines the behavior of the proxy.
 * `cacheServerPath`: Base directory for caching tiles.
 * `ops`: A list of operations to perform on the tiles.
 * `upstreamHttp`: (Optional) Shared HTTP client settings for upstream fetches in tile and Mapbox style proxying.
+* `logUpstreamErrors`: (Optional) If set to `true`, log upstream fetch failures to PHP's `error_log`.
 * `debug`: (Optional) If set to `true`, outputs exceptions in the browser.
 * `prefixArgName`: (Optional) Name of the GET parameter to use for prefixing (e.g., to support different map styles).
 * `allowedPrefixes`: (Optional) List of allowed values for the prefix argument.
@@ -58,6 +59,30 @@ requests. HTTP(S) fetches go through Guzzle; `file://` URLs are read from disk. 
 
 For tile pipelines, set `upstreamHttp` at the root of the config. A `src` operation can override it with its own
 `upstreamHttp` block.
+
+### Upstream error logging
+
+Transport failures (for example an invalid proxy URI, connection timeout, or unreadable `file://` URL) are handled
+gracefully in the tile pipeline, but are otherwise silent unless logging is enabled. HTTP 4xx/5xx responses are not
+logged by default because missing tiles are normal.
+
+Enable PHP `error_log` output in config:
+
+```jsonc
+"logUpstreamErrors": true
+```
+
+Or wire a PSR-3 compatible logger (Monolog, Symfony, etc.) before handling requests:
+
+```php
+use OpenMapsight\TileProxy\Log;
+use OpenMapsight\TileProxy\Base;
+
+Log::setLogger($logger);
+Base::run($config);
+```
+
+Failed fetches also expose a short reason on `UpstreamFetchResult::$error` when you call `UpstreamFetcher` directly.
 
 ### Operation Pipeline (Chaining)
 

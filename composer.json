@@ -28,7 +28,8 @@
         "spatie/image-optimizer": "^1.8.1"
     },
     "suggest": {
-        "ext-imagick": "Required for colorFilter tile operations"
+        "ext-imagick": "Required for colorFilter tile operations",
+        "psr/log": "Use a PSR-3 logger via Log::setLogger()"
     },
     "scripts": {
         "test": "phpunit",
