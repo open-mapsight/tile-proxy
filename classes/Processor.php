@@ -11,7 +11,7 @@ use OpenMapsight\TileProxy\Ops\OpHandler;
 use OpenMapsight\TileProxy\Ops\SrcOp;
 use RuntimeException;
 
-class Processor
+class Processor implements PipelineRunner
 {
     /**
      * @return array<string, class-string<OpHandler>>

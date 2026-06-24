@@ -4,18 +4,18 @@ declare(strict_types=1);
 namespace OpenMapsight\TileProxy\Ops;
 
 use Exception;
-use OpenMapsight\TileProxy\Processor;
+use OpenMapsight\TileProxy\PipelineRunner;
 use OpenMapsight\TileProxy\Result;
 use OpenMapsight\TileProxy\Utils;
 
 class MergeOp implements OpHandler
 {
     /**
-     * @param class-string<Processor> $processorClass
-     * @param array<string, mixed>    $upstreamHttp
+     * @param class-string<PipelineRunner> $pipelineRunner
+     * @param array<string, mixed>         $upstreamHttp
      */
     public function __construct(
-        private readonly string $processorClass,
+        private readonly string $pipelineRunner,
         private readonly array  $upstreamHttp = [],
     )
     {
@@ -29,7 +29,7 @@ class MergeOp implements OpHandler
         $res->checkpointCache();
         Utils::assertImageMimeType($res->mimeType);
 
-        $subRes = ($this->processorClass)::run(
+        $subRes = ($this->pipelineRunner)::run(
             $cfg['ops'],
             $res->getReqArgs(),
             $res->getCachePath(),
