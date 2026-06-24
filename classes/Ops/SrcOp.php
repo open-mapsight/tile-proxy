@@ -28,7 +28,7 @@ class SrcOp implements OpHandler
                 && time() - ($cfg['cacheServer5xxTtl'] ?? 300) < $res->getMetadata()->last5xx
             ) {
                 // last request failed & we're in the retry cooldown window
-                $res->cacheBrowserTtl = $cfg['cacheBrowserTtlFail'];
+                $res->cacheBrowserTtl = $cfg['cacheBrowserTtlFail'] ?? 300;
                 return false;
             }
 
@@ -60,7 +60,7 @@ class SrcOp implements OpHandler
                     $res->getMetadata()->last4xx = time();
                 } else if ($httpResCode !== null && 500 <= $httpResCode && $httpResCode <= 599) {
                     $res->getMetadata()->last5xx = time();
-                    $res->cacheBrowserTtl = $cfg['cacheBrowserTtlFail'];
+                    $res->cacheBrowserTtl = $cfg['cacheBrowserTtlFail'] ?? 300;
                 }
             } else {
                 $res->setData($fetchResult->body);
