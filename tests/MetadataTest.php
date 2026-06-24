@@ -35,11 +35,25 @@ class MetadataTest extends TestCase
         $scope->test = 'value';
         $this->assertEquals('value', $scope->test);
         $this->assertEquals('value', $meta->{'prefix|test'});
+        $scope->setLast4xx(123);
+        $this->assertSame(123, $scope->getLast4xx());
 
         Metadata::save($meta);
 
         $json = json_decode(file_get_contents($this->tempFile), true);
-        $this->assertEquals(['prefix|test' => 'value'], $json);
+        $this->assertEquals(['prefix|test' => 'value', 'prefix|last4xx' => 123], $json);
+    }
+
+    public function testMetadataScopeSaveDelegatesToRootMetadata(): void
+    {
+        $meta = new Metadata($this->tempFile);
+        $scope = new MetadataScope(new MetadataScope($meta, 'outer'), 'inner');
+
+        $scope->retryAt = 123;
+        MetadataScope::save($scope);
+
+        $json = json_decode(file_get_contents($this->tempFile), true);
+        $this->assertEquals(['outer|inner|retryAt' => 123], $json);
     }
 
     protected function setUp(): void

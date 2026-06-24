@@ -16,16 +16,16 @@ class SrcOp implements OpHandler
 
         $invalidateCache = (static function () use ($res, $cfg) {
             if (
-                is_int($res->getMetadata()->last4xx)
-                && time() - ($cfg['cacheServer4xxTtl'] ?? 3600) < $res->getMetadata()->last4xx
+                $res->getMetadata()->getLast4xx() !== null
+                && time() - ($cfg['cacheServer4xxTtl'] ?? 3600) < $res->getMetadata()->getLast4xx()
             ) {
                 // last request failed & we're in the retry cooldown window
                 return false;
             }
 
             if (
-                is_int($res->getMetadata()->last5xx)
-                && time() - ($cfg['cacheServer5xxTtl'] ?? 300) < $res->getMetadata()->last5xx
+                $res->getMetadata()->getLast5xx() !== null
+                && time() - ($cfg['cacheServer5xxTtl'] ?? 300) < $res->getMetadata()->getLast5xx()
             ) {
                 // last request failed & we're in the retry cooldown window
                 $res->cacheBrowserTtl = $cfg['cacheBrowserTtlFail'] ?? 300;
@@ -47,19 +47,21 @@ class SrcOp implements OpHandler
 
         if ($invalidateCache) {
             $url = $this->getSrcUrl($cfg, $res);
+            $mimeType = $cfg['mimeType'] ?? null;
             $fetchResult = UpstreamFetcher::fetch(
                 $url,
                 $cfg['upstreamHttp'] ?? [],
-                $cfg['mimeType'] ?? null
+                $mimeType,
+                $mimeType
             );
 
             if (!$fetchResult->isSuccess()) {
                 $httpResCode = $fetchResult->statusCode;
 
                 if ($httpResCode !== null && 400 <= $httpResCode && $httpResCode <= 499) {
-                    $res->getMetadata()->last4xx = time();
+                    $res->getMetadata()->setLast4xx(time());
                 } else if ($httpResCode !== null && 500 <= $httpResCode && $httpResCode <= 599) {
-                    $res->getMetadata()->last5xx = time();
+                    $res->getMetadata()->setLast5xx(time());
                     $res->cacheBrowserTtl = $cfg['cacheBrowserTtlFail'] ?? 300;
                 }
             } else {

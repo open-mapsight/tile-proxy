@@ -11,7 +11,17 @@ class MetadataScope
 
     public static function save(self $self): void
     {
-        $self->ref->save($self->ref);
+        Metadata::save($self->getRootMetadata());
+    }
+
+    private function getRootMetadata(): Metadata
+    {
+        $ref = $this->ref;
+        while ($ref instanceof MetadataScope) {
+            $ref = $ref->ref;
+        }
+
+        return $ref;
     }
 
     public function __get(string $key)
@@ -32,5 +42,27 @@ class MetadataScope
     public function __unset(string $key)
     {
         $this->ref->__unset($this->keyPrefix . '|' . $key);
+    }
+
+    public function getLast4xx(): ?int
+    {
+        $value = $this->__get('last4xx');
+        return is_int($value) ? $value : null;
+    }
+
+    public function setLast4xx(int $timestamp): void
+    {
+        $this->__set('last4xx', $timestamp);
+    }
+
+    public function getLast5xx(): ?int
+    {
+        $value = $this->__get('last5xx');
+        return is_int($value) ? $value : null;
+    }
+
+    public function setLast5xx(int $timestamp): void
+    {
+        $this->__set('last5xx', $timestamp);
     }
 }
