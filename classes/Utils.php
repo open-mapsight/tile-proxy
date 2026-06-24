@@ -103,7 +103,10 @@ class Utils
     public static function writeToFile(string $path, string $data): void
     {
         self::mkdirp(dirname($path));
-        @file_put_contents($path, $data);
+
+        if (file_put_contents($path, $data) === false) {
+            throw new RuntimeException('Could not write to file "' . $path . '"');
+        }
     }
 
     public static function mkdirp($pathDir): void

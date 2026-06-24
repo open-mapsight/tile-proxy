@@ -71,4 +71,30 @@ class UtilsTest extends TestCase
         @rmdir(__DIR__ . '/../temp_test_dir/nested');
         @rmdir(__DIR__ . '/../temp_test_dir');
     }
+
+    public function testWriteToFileWritesData(): void
+    {
+        $path = sys_get_temp_dir() . '/tile_proxy_write_test_' . uniqid() . '/file.bin';
+
+        Utils::writeToFile($path, 'hello');
+
+        $this->assertSame('hello', file_get_contents($path));
+
+        unlink($path);
+        rmdir(dirname($path));
+    }
+
+    public function testWriteToFileThrowsWhenWriteFails(): void
+    {
+        $dir = sys_get_temp_dir() . '/tile_proxy_write_dir_' . uniqid();
+        mkdir($dir);
+
+        try {
+            $this->expectException(\RuntimeException::class);
+            $this->expectExceptionMessage('Could not write to file');
+            Utils::writeToFile($dir, 'data');
+        } finally {
+            rmdir($dir);
+        }
+    }
 }
