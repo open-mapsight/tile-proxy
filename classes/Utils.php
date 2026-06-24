@@ -42,6 +42,14 @@ class Utils
         return $decoded;
     }
 
+    /**
+     * @param array<string, mixed> $cfg
+     */
+    public static function mapAssetBasePath(array $cfg): string
+    {
+        return rtrim((string)($cfg['mapAssetBasePath'] ?? $cfg['publicBasePath'] ?? ''), '/');
+    }
+
     public static function assertImageMimeType(string $mimeType): void
     {
         $found = in_array(

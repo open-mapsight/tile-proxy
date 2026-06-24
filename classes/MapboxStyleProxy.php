@@ -15,12 +15,18 @@ class MapboxStyleProxy
         'glyph' => 2592000,
     ];
 
-    public static function handleRequest(array $cfg, string $requestPath): MapboxStyleProxyResponse
+    public static function run(array $cfg, string $requestPath): void
     {
-        Log::configureFromConfig($cfg);
+        HttpResponse::sendRequest(
+            $cfg,
+            static fn () => self::handleRequest($cfg, $requestPath)
+        );
+    }
 
-        $publicBasePath = rtrim((string)($cfg['publicBasePath'] ?? ''), '/');
-        $routePath = self::stripPublicBasePath($requestPath, $publicBasePath);
+    public static function handleRequest(array $cfg, string $requestPath): HttpResponse
+    {
+        $basePath = Utils::mapAssetBasePath($cfg);
+        $routePath = self::stripMapAssetBasePath($requestPath, $basePath);
 
         if (preg_match('#^styles/([^/]+)\.json$#', $routePath, $matches) === 1) {
             $styleName = rawurldecode($matches[1]);
@@ -28,10 +34,11 @@ class MapboxStyleProxy
             $style = MapboxStyleTransforms::apply($style, self::getStyleCfg($cfg, $styleName));
             $style = self::rewriteStyle($cfg, $styleName, $style);
 
-            return new MapboxStyleProxyResponse(
+            return new HttpResponse(
                 json_encode($style, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
                 'application/json',
-                self::getCacheTtl(self::getStyleCfg($cfg, $styleName), 'style')
+                self::getCacheTtl(self::getStyleCfg($cfg, $styleName), 'style'),
+                null
             );
         }
 
@@ -49,10 +56,11 @@ class MapboxStyleProxy
             $tileJson = self::decodeJson(self::fetchWithCache($cfg, $styleName, $styleCfg, 'tilejson', $tileJsonUrl));
             $tileJson = self::rewriteTileJson($cfg, $styleName, $sourceName, $tileJson, $tileJsonUrl);
 
-            return new MapboxStyleProxyResponse(
+            return new HttpResponse(
                 json_encode($tileJson, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
                 'application/json',
-                self::getCacheTtl($styleCfg, 'tilejson')
+                self::getCacheTtl($styleCfg, 'tilejson'),
+                null
             );
         }
 
@@ -67,10 +75,11 @@ class MapboxStyleProxy
             $tileUrl = self::getTileTemplate($cfg, $styleName, $sourceName, $tileIndex);
             $tileUrl = str_replace(['{z}', '{x}', '{y}'], [$z, $x, $y], $tileUrl);
 
-            return new MapboxStyleProxyResponse(
+            return new HttpResponse(
                 self::fetchWithCache($cfg, $styleName, $styleCfg, 'tile', $tileUrl),
                 'application/x-protobuf',
-                self::getCacheTtl($styleCfg, 'tile')
+                self::getCacheTtl($styleCfg, 'tile'),
+                null
             );
         }
 
@@ -80,10 +89,11 @@ class MapboxStyleProxy
             $extension = $matches[3];
             $styleCfg = self::getStyleCfg($cfg, $styleName);
 
-            return new MapboxStyleProxyResponse(
+            return new HttpResponse(
                 self::fetchWithCache($cfg, $styleName, $styleCfg, 'sprite', $spriteBaseUrl . '.' . $extension),
                 $extension === 'png' ? 'image/png' : 'application/json',
-                self::getCacheTtl($styleCfg, 'sprite')
+                self::getCacheTtl($styleCfg, 'sprite'),
+                null
             );
         }
 
@@ -107,29 +117,30 @@ class MapboxStyleProxy
                 );
             }
 
-            return new MapboxStyleProxyResponse(
+            return new HttpResponse(
                 self::fetchWithCache($cfg, $styleName, $styleCfg, 'glyph', $glyphUrl),
                 'application/x-protobuf',
-                self::getCacheTtl($styleCfg, 'glyph')
+                self::getCacheTtl($styleCfg, 'glyph'),
+                null
             );
         }
 
         throw new UserException('Unsupported map asset route');
     }
 
-    private static function stripPublicBasePath(string $requestPath, string $publicBasePath): string
+    private static function stripMapAssetBasePath(string $requestPath, string $basePath): string
     {
         $path = parse_url($requestPath, PHP_URL_PATH);
         if (!is_string($path)) {
             throw new UserException('Invalid request path');
         }
 
-        if ($publicBasePath !== '') {
-            if ($path !== $publicBasePath && !str_starts_with($path, $publicBasePath . '/')) {
+        if ($basePath !== '') {
+            if ($path !== $basePath && !str_starts_with($path, $basePath . '/')) {
                 throw new UserException('Request path is outside the configured map asset base path');
             }
 
-            $path = substr($path, strlen($publicBasePath));
+            $path = substr($path, strlen($basePath));
         }
 
         return ltrim($path, '/');
@@ -354,9 +365,9 @@ class MapboxStyleProxy
 
     private static function publicUrl(array $cfg, string $route): string
     {
-        $publicBasePath = rtrim((string)($cfg['publicBasePath'] ?? ''), '/');
+        $basePath = Utils::mapAssetBasePath($cfg);
 
-        return $publicBasePath . '/' . ltrim($route, '/');
+        return $basePath . '/' . ltrim($route, '/');
     }
 
     private static function getStyleCfg(array $cfg, string $styleName): array

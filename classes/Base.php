@@ -27,75 +27,74 @@ class Base
         string $processorClass = Processor::class
     ): void
     {
-        Log::configureFromConfig($cfg);
+        HttpResponse::sendRequest(
+            $cfg,
+            static fn () => static::handleTileRequest($cfg, $processorClass)
+        );
+    }
 
-        try {
-            $reqArgs = static::getReqArgs($cfg);
-            $cachePath = static::getCachePath($cfg, $reqArgs);
+    /**
+     * @throws Throwable
+     */
+    public static function handleTileRequest(
+        array  $cfg,
+        string $processorClass = Processor::class
+    ): HttpResponse
+    {
+        $reqArgs = static::getReqArgs($cfg);
+        $cachePath = static::getCachePath($cfg, $reqArgs);
 
-            $metadataPath = $cachePath . '-.metadata';
-            Utils::mkdirp(dirname($cachePath));
-            $lockH = fopen($metadataPath, 'cb');
-            for ($lockTry = 1; ; ++$lockTry) {
-                if (flock($lockH, LOCK_EX | LOCK_NB) === true) {
+        $metadataPath = $cachePath . '-.metadata';
+        Utils::mkdirp(dirname($cachePath));
+        $lockH = fopen($metadataPath, 'cb');
+        for ($lockTry = 1; ; ++$lockTry) {
+            if (flock($lockH, LOCK_EX | LOCK_NB) === true) {
+                break;
+            }
+
+            if (10 <= $lockTry) {
+                if (isset($cfg['yoloOnLockTimeout']) && $cfg['yoloOnLockTimeout'] === true) {
+                    @error_log('Yoloed lock for "' . $metadataPath . '"' . "\n");
                     break;
                 }
 
-                if (10 <= $lockTry) {
-                    if (isset($cfg['yoloOnLockTimeout']) && $cfg['yoloOnLockTimeout'] === true) {
-                        @error_log('Yoloed lock for "' . $metadataPath . '"' . "\n");
-                        break;
-                    }
-
-                    throw new RuntimeException('Can not lock "' . $metadataPath . '"');
-                }
-
-                usleep($lockTry * $lockTry * 10 * 1000);
+                throw new RuntimeException('Can not lock "' . $metadataPath . '"');
             }
 
-            try {
-                $meta = new Metadata($metadataPath);
+            usleep($lockTry * $lockTry * 10 * 1000);
+        }
 
-                /** @var Result $res */
-                $res = call_user_func(
-                    [$processorClass, 'run'],
-                    $cfg['ops'],
-                    $reqArgs,
-                    $cachePath,
-                    new MetadataScope($meta, ''),
-                    $cfg['upstreamHttp'] ?? []
-                );
+        try {
+            $meta = new Metadata($metadataPath);
 
-                if ($res->failure !== null) {
-                    throw $res->failure;
-                }
+            /** @var Result $res */
+            $res = call_user_func(
+                [$processorClass, 'run'],
+                $cfg['ops'],
+                $reqArgs,
+                $cachePath,
+                new MetadataScope($meta, ''),
+                $cfg['upstreamHttp'] ?? []
+            );
 
-                $res->checkpointCache();
-                Metadata::save($meta);
-                $response = static::buildTileResponse($res);
-            } finally {
-                flock($lockH, LOCK_UN);
+            if ($res->failure !== null) {
+                throw $res->failure;
             }
 
-            static::sendTileResponse($response);
-        } catch (UserException $e) {
-            header('HTTP/1.0 400 Bad Request', true, 400);
-            echo $e->getMessage();
-        } catch (Throwable $e) {
-            header('HTTP/1.0 500 Internal Server Error', true, 500);
-            if (isset($cfg['debug']) && $cfg['debug'] === true) {
-                echo '<pre>';
-                echo $e;
-                echo '</pre>';
-            }
+            $res->checkpointCache();
+            Metadata::save($meta);
+
+            return static::buildTileResponse($res);
+        } finally {
+            flock($lockH, LOCK_UN);
         }
     }
 
-    public static function buildTileResponse(Result $res): TileResponse
+    public static function buildTileResponse(Result $res): HttpResponse
     {
         $data = $res->getData();
         if ($data === null) {
-            return new TileResponse(null, null, null, null);
+            return new HttpResponse(null, null, null, null);
         }
 
         assert($res->mimeType !== null);
@@ -105,7 +104,7 @@ class Base
             && $mTime !== null
             && $mTime <= @strtotime($_SERVER['HTTP_IF_MODIFIED_SINCE']);
 
-        return new TileResponse(
+        return new HttpResponse(
             $notModified ? null : $data,
             $res->mimeType,
             $res->cacheBrowserTtl,
@@ -114,37 +113,10 @@ class Base
         );
     }
 
-    public static function sendTileResponse(TileResponse $response): void
+    /** @deprecated Use HttpResponse::send() */
+    public static function sendTileResponse(HttpResponse $response): void
     {
-        if ($response->isNotFound()) {
-            header('HTTP/1.0 404 Not Found', true, 404);
-            echo 'tile not found';
-            return;
-        }
-
-        assert($response->mimeType !== null);
-
-        $time = time();
-
-        header('Content-Type: ' . $response->mimeType);
-
-        if ($response->cacheBrowserTtl !== null) {
-            header('Expires: ' . gmdate('D, d M Y H:i:s', $time + $response->cacheBrowserTtl) . ' GMT');
-            header('Cache-Control: public, max-age=' . $response->cacheBrowserTtl);
-        }
-
-        if ($response->cacheMTime !== null) {
-            header('Last-Modified: ' . gmdate('D, d M Y H:i:s', $response->cacheMTime) . ' GMT');
-        }
-
-        if ($response->notModified) {
-            header('HTTP/1.1 304 Not Modified');
-            return;
-        }
-
-        assert($response->body !== null);
-        header('Content-Length: ' . strlen($response->body));
-        echo $response->body;
+        HttpResponse::send($response);
     }
 
     /** @return array<string, string|null> */

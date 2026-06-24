@@ -8,35 +8,107 @@ You can initialize the proxy by providing a configuration array or by pointing t
 
 ### Initialization
 
-#### Using JSONC Configuration
+Use `Proxy` when a single config serves both raster tile pipelines and Mapbox style assets. It routes style asset
+requests under `mapAssetBasePath` to `MapboxStyleProxy` and everything else with an `ops` pipeline to `Base`.
+
+#### Combined or JSONC configuration
+```php
+use OpenMapsight\TileProxy\Proxy;
+
+Proxy::runFromJsonConfigFile('/path/to/config.jsonc');
+```
+
+#### Raster tiles only
 ```php
 use OpenMapsight\TileProxy\Base;
 
 Base::runFromJsonConfigFile('/path/to/config.jsonc');
 ```
 
-#### Using Array Configuration
+#### Mapbox style assets only
 ```php
-use OpenMapsight\TileProxy\Base;
+use OpenMapsight\TileProxy\MapboxStyleProxy;
+
+MapboxStyleProxy::run($config, $_SERVER['REQUEST_URI']);
+```
+
+#### Using array configuration
+```php
+use OpenMapsight\TileProxy\Proxy;
 
 $config = [
     // ... configuration ...
 ];
 
-Base::run($config);
+Proxy::run($config);
 ```
+
+Both `Proxy`, `Base`, and `MapboxStyleProxy::run()` send HTTP status, cache, and content headers automatically.
+Use `MapboxStyleProxy::handleRequest()` or `Base::handleTileRequest()` when you need the `HttpResponse` object without
+sending output.
 
 ## Configuration
 
 The configuration defines the behavior of the proxy.
 
-* `cacheServerPath`: Base directory for caching tiles.
-* `ops`: A list of operations to perform on the tiles.
+* `cacheServerPath`: Base directory for caching tiles and map assets.
+* `ops`: (Raster tiles) Operation pipeline for bitmap tile requests.
+* `mapAssetBasePath`: (Mapbox styles) URL path prefix for proxied style JSON, vector tiles, sprites, and glyphs.
+* `styles`: (Mapbox styles) Named style configurations for `MapboxStyleProxy`.
 * `upstreamHttp`: (Optional) Shared HTTP client settings for upstream fetches in tile and Mapbox style proxying.
-* `logUpstreamErrors`: (Optional) If set to `true`, log upstream fetch failures to PHP's `error_log`.
-* `debug`: (Optional) If set to `true`, outputs exceptions in the browser.
+* `logErrors`: (Optional) If set to `true`, log upstream fetch warnings and request handler failures to PHP's `error_log`.
 * `prefixArgName`: (Optional) Name of the GET parameter to use for prefixing (e.g., to support different map styles).
 * `allowedPrefixes`: (Optional) List of allowed values for the prefix argument.
+
+### Combined raster tiles and Mapbox styles
+
+Use one JSONC file and `Proxy::runFromJsonConfigFile()` when you need both bitmap tiles and Mapbox/MapLibre style assets.
+Root-level settings such as `cacheServerPath`, `upstreamHttp`, and `logErrors` apply to both modes.
+
+```jsonc
+{
+    "cacheServerPath": "/var/cache/mapsight-tile-proxy",
+    "upstreamHttp": {
+        "timeout": 30
+    },
+    "logErrors": true,
+
+    "ops": [
+        {
+            "cacheServerName": "base-map",
+            "urls": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+            "mimeType": "image/png",
+            "cacheBrowserTtl": 3600,
+            "cacheServerTtl": 86400
+        }
+    ],
+
+    "mapAssetBasePath": "/map-assets",
+    "styles": {
+        "city-default": {
+            "upstreamStyleUrl": "https://example.com/styles/base.json",
+            "allowedHosts": ["example.com"],
+            "allowedPathPrefixes": [
+                "/styles/",
+                "/tiles/",
+                "/sprites/",
+                "/fonts/"
+            ]
+        }
+    }
+}
+```
+
+`Proxy` routes by request path:
+
+```text
+/tile-proxy.php?z=12&x=2200&y=1340              → raster pipeline (`ops`)
+/map-assets/styles/city-default.json            → Mapbox style proxy (`styles`)
+/map-assets/tiles/city-default/source/0/12/2200/1340.pbf  → vector tile from style proxy
+```
+
+Raster tiles use `x`, `y`, and `z` query parameters. Mapbox assets use path segments under `mapAssetBasePath`. Keep
+those URL spaces separate so `Proxy` can pick the right handler.
 
 ### Upstream HTTP settings
 
@@ -60,29 +132,85 @@ requests. HTTP(S) fetches go through Guzzle; `file://` URLs are read from disk. 
 For tile pipelines, set `upstreamHttp` at the root of the config. A `src` operation can override it with its own
 `upstreamHttp` block.
 
-### Upstream error logging
+### Error logging
 
-Transport failures (for example an invalid proxy URI, connection timeout, or unreadable `file://` URL) are handled
-gracefully in the tile pipeline, but are otherwise silent unless logging is enabled. HTTP 4xx/5xx responses are not
-logged by default because missing tiles are normal.
+Most failures are handled gracefully in HTTP responses, but are otherwise silent unless logging is enabled.
+
+When `logErrors` is `true`, or a PSR-3 logger is wired via `Log::setLogger()`, the library logs:
+
+* **Warnings** for upstream transport failures (invalid proxy URI, timeouts, unreadable `file://` URLs, content-type mismatches)
+* **Errors** for uncaught request handler failures that become HTTP 500 responses (cache write failures, missing extensions, pipeline misconfiguration)
+
+HTTP 4xx client errors and missing upstream tiles are not logged by default.
 
 Enable PHP `error_log` output in config:
 
 ```jsonc
-"logUpstreamErrors": true
+"logErrors": true
 ```
 
-Or wire a PSR-3 compatible logger (Monolog, Symfony, etc.) before handling requests:
+For production, wire a PSR-3 compatible logger before handling requests. The library calls `warning()` for upstream
+issues and `error()` for request handler failures.
+
+#### Plain PHP entry file with Monolog
+
+Install Monolog in your project (`composer require monolog/monolog`), then use a small front script such as
+`public/tile-proxy.php`:
 
 ```php
+<?php
+declare(strict_types=1);
+
+require __DIR__ . '/../vendor/autoload.php';
+
+use Monolog\Handler\StreamHandler;
+use Monolog\Level;
+use Monolog\Logger;
 use OpenMapsight\TileProxy\Log;
-use OpenMapsight\TileProxy\Base;
+use OpenMapsight\TileProxy\Proxy;
+
+$logger = new Logger('tile-proxy');
+$logger->pushHandler(new StreamHandler('php://stderr', Level::Warning));
 
 Log::setLogger($logger);
-Base::run($config);
+Proxy::runFromJsonConfigFile(__DIR__ . '/../config/tile-proxy.jsonc');
 ```
 
-Failed fetches also expose a short reason on `UpstreamFetchResult::$error` when you call `UpstreamFetcher` directly.
+Point your web server at that script (or at `index.php` if you inline the same setup there). Logging to
+`php://stderr` works well in Docker; use a file path such as `/var/log/tile-proxy.log` on a normal VM instead.
+
+#### Symfony app logger in a dedicated entry script
+
+Symfony already provides a PSR-3 logger (Monolog). Because `Proxy::run()` sends headers and body itself, call it from
+a dedicated entry script rather than returning a Symfony `Response`:
+
+```php
+<?php
+declare(strict_types=1);
+
+use OpenMapsight\TileProxy\Log;
+use OpenMapsight\TileProxy\Proxy;
+use Psr\Log\LoggerInterface;
+use Symfony\Component\HttpKernel\Kernel;
+
+require dirname(__DIR__) . '/vendor/autoload.php';
+
+/** @var Kernel $kernel */
+$kernel = new App\Kernel($_SERVER['APP_ENV'], (bool) $_SERVER['APP_DEBUG']);
+$kernel->boot();
+
+/** @var LoggerInterface $logger */
+$logger = $kernel->getContainer()->get('logger');
+
+Log::setLogger($logger);
+Proxy::runFromJsonConfigFile(dirname(__DIR__) . '/config/tile-proxy.jsonc');
+```
+
+Route `/tiles` or `/map-assets` directly to that script in nginx or Apache. In a Symfony controller action the same
+logger wiring works, but you would need to capture output yourself via `Base::handleTileRequest()` or
+`MapboxStyleProxy::handleRequest()` instead of `Proxy::run()`.
+
+Failed upstream fetches also expose a short reason on `UpstreamFetchResult::$error` when you call `UpstreamFetcher` directly.
 
 ### Operation Pipeline (Chaining)
 
@@ -125,13 +253,17 @@ upstream URLs on demand.
 ```php
 use OpenMapsight\TileProxy\MapboxStyleProxy;
 
-$response = MapboxStyleProxy::handleRequest($config, $_SERVER['REQUEST_URI']);
+MapboxStyleProxy::run($config, $_SERVER['REQUEST_URI']);
+```
 
-header('Content-Type: ' . $response->mimeType);
-if ($response->cacheBrowserTtl !== null) {
-    header('Cache-Control: public, max-age=' . $response->cacheBrowserTtl);
-}
-echo $response->data;
+For custom response handling:
+
+```php
+use OpenMapsight\TileProxy\HttpResponse;
+use OpenMapsight\TileProxy\MapboxStyleProxy;
+
+$response = MapboxStyleProxy::handleRequest($config, $_SERVER['REQUEST_URI']);
+HttpResponse::send($response);
 ```
 
 Example configuration:
@@ -139,7 +271,7 @@ Example configuration:
 ```jsonc
 {
     "cacheServerPath": "/var/cache/mapsight-tile-proxy",
-    "publicBasePath": "/map-assets",
+    "mapAssetBasePath": "/map-assets",
     "upstreamHttp": {
         "proxy": "tcp://proxy.example.com:8080",
         "timeout": 30

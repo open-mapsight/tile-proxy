@@ -84,6 +84,22 @@ class UtilsTest extends TestCase
         rmdir(dirname($path));
     }
 
+    public function testMapAssetBasePathPrefersNewKeyOverAlias(): void
+    {
+        $this->assertSame(
+            '/map-assets',
+            Utils::mapAssetBasePath([
+                'mapAssetBasePath' => '/map-assets',
+                'publicBasePath' => '/legacy',
+            ])
+        );
+    }
+
+    public function testMapAssetBasePathAcceptsPublicBasePathAlias(): void
+    {
+        $this->assertSame('/map-assets', Utils::mapAssetBasePath(['publicBasePath' => '/map-assets/']));
+    }
+
     public function testWriteToFileThrowsWhenWriteFails(): void
     {
         $dir = sys_get_temp_dir() . '/tile_proxy_write_dir_' . uniqid();

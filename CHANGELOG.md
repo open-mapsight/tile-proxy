@@ -10,18 +10,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Root-level `upstreamHttp` configuration for proxy, timeouts, redirects, and request headers. When set, it applies to tile source fetches and `MapboxStyleProxy` unless a `src` operation defines its own `upstreamHttp` block.
+- `logErrors` configuration and optional PSR-3 logging via `Log::setLogger()` for upstream fetch warnings and request handler failures.
+- `HttpResponse` value object with shared HTTP header/output handling.
+- `Proxy` entry point for combined raster tile and Mapbox style asset configs.
+- `MapboxStyleProxy::run()` for map asset requests with automatic response headers.
+- `mapAssetBasePath` configuration for the URL prefix of proxied Mapbox/MapLibre style assets.
 
 ### Changed
 
 - **Breaking:** tile source HTTP options use `upstreamHttp` instead of PHP `streamContext` (see migration below). Per-op overrides on `src` operations are still supported.
+- **Breaking:** `publicBasePath` renamed to `mapAssetBasePath`. The old key still works as a fallback.
 - `ext-imagick` is no longer a required dependency; install it only when using `colorFilter` ops (missing extension throws a clear runtime error).
 - Upstream responses with an unexpected `Content-Type` are treated as fetch failures.
 - Invalid JSONC config and failed cache file writes now throw exceptions instead of failing silently.
 - `cacheBrowserTtlFail` on `src` ops defaults to 300 seconds when omitted.
+- `Base::run()`, `MapboxStyleProxy::run()`, and `Proxy::run()` send HTTP responses through `HttpResponse::sendRequest()`.
 
 ### Removed
 
 - Per-op `streamContext` on tile `src` operations (replaced by `upstreamHttp`).
+- `debug` configuration option that printed exceptions in the browser response. Use `logErrors` or `Log::setLogger()` instead.
+- `TileResponse` and `MapboxStyleProxyResponse` (replaced by `HttpResponse`).
 
 ### Migration from 1.x
 
@@ -80,6 +89,18 @@ Rename `streamContext` to `upstreamHttp` and convert PHP stream-context keys to 
 In the per-src example, `corp-tiles` uses its own `upstreamHttp` block; `public-tiles` inherits the root defaults. Use separate `src` operations (including in `merge` sub-pipelines) when different upstreams need different HTTP settings.
 
 Use the same root `upstreamHttp` block for Mapbox style proxy deployments.
+
+Replace `debug: true` with logging:
+
+```jsonc
+"logErrors": true
+```
+
+Or wire a PSR-3 logger in your bootstrap PHP before calling `Proxy::run()`, `Base::run()`, or `MapboxStyleProxy::run()`.
+
+For combined tile and Mapbox style configs, prefer `Proxy::runFromJsonConfigFile()` over calling `Base` and `MapboxStyleProxy` separately.
+
+Rename `publicBasePath` to `mapAssetBasePath` in Mapbox style configs. The old key still works in 2.0.
 
 ## [1.1.0] - 2026-06-22
 

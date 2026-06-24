@@ -20,7 +20,7 @@ class MapboxStyleProxyTest extends TestCase
 
         $this->assertSame('application/json', $response->mimeType);
 
-        $style = json_decode($response->data, true);
+        $style = json_decode($response->body, true);
         $this->assertSame('/map-assets/tilejson/city-default/fromTileJson.json', $style['sources']['fromTileJson']['url']);
         $this->assertSame(['/map-assets/tiles/city-default/directTiles/0/{z}/{x}/{y}.pbf'], $style['sources']['directTiles']['tiles']);
         $this->assertStringStartsWith('/map-assets/sprites/city-default/', $style['sprite']);
@@ -40,7 +40,7 @@ class MapboxStyleProxyTest extends TestCase
 
         $this->assertSame('application/json', $response->mimeType);
 
-        $tileJson = json_decode($response->data, true);
+        $tileJson = json_decode($response->body, true);
         $this->assertSame(['/map-assets/tiles/city-default/fromTileJson/0/{z}/{x}/{y}.pbf'], $tileJson['tiles']);
     }
 
@@ -50,29 +50,29 @@ class MapboxStyleProxyTest extends TestCase
 
         $response = MapboxStyleProxy::handleRequest($this->cfg, $path);
         $this->assertSame('application/x-protobuf', $response->mimeType);
-        $this->assertSame('vector tile bytes', $response->data);
+        $this->assertSame('vector tile bytes', $response->body);
 
         unlink($this->assetDir . '/tiles/12/2200/1340.pbf');
 
         $cachedResponse = MapboxStyleProxy::handleRequest($this->cfg, $path);
-        $this->assertSame('vector tile bytes', $cachedResponse->data);
+        $this->assertSame('vector tile bytes', $cachedResponse->body);
     }
 
     public function testSpriteAndGlyphResponsesAreProxied(): void
     {
         $style = json_decode(
-            MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/styles/city-default.json')->data,
+            MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/styles/city-default.json')->body,
             true
         );
 
         $spriteJsonPath = $style['sprite'] . '.json';
         $spriteJsonResponse = MapboxStyleProxy::handleRequest($this->cfg, $spriteJsonPath);
         $this->assertSame('application/json', $spriteJsonResponse->mimeType);
-        $this->assertSame('{"sprite":true}', $spriteJsonResponse->data);
+        $this->assertSame('{"sprite":true}', $spriteJsonResponse->body);
 
         $spritePngResponse = MapboxStyleProxy::handleRequest($this->cfg, $style['sprite'] . '.png');
         $this->assertSame('image/png', $spritePngResponse->mimeType);
-        $this->assertSame('png bytes', $spritePngResponse->data);
+        $this->assertSame('png bytes', $spritePngResponse->body);
 
         $glyphPath = str_replace(
             ['{fontstack}', '{range}'],
@@ -81,7 +81,7 @@ class MapboxStyleProxyTest extends TestCase
         );
         $glyphResponse = MapboxStyleProxy::handleRequest($this->cfg, $glyphPath);
         $this->assertSame('application/x-protobuf', $glyphResponse->mimeType);
-        $this->assertSame('glyph bytes', $glyphResponse->data);
+        $this->assertSame('glyph bytes', $glyphResponse->body);
     }
 
     public function testDisallowedUpstreamUrlsAreRejected(): void
@@ -155,7 +155,7 @@ class MapboxStyleProxyTest extends TestCase
 
         $this->cfg = [
             'cacheServerPath' => $this->cacheDir,
-            'publicBasePath' => '/map-assets',
+            'mapAssetBasePath' => '/map-assets',
             'styles' => [
                 'city-default' => [
                     'upstreamStyleUrl' => 'file://' . $this->assetDir . '/styles/city.json',

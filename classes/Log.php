@@ -5,7 +5,7 @@ namespace OpenMapsight\TileProxy;
 
 class Log
 {
-    /** @var object|null Logger with a `warning(string $message, array $context = []): void` method (PSR-3 compatible). */
+    /** @var object|null PSR-3 compatible logger with `warning()` and `error()` methods. */
     private static ?object $logger = null;
 
     private static bool $useErrorLog = false;
@@ -28,7 +28,7 @@ class Log
      */
     public static function configureFromConfig(array $cfg): void
     {
-        self::$useErrorLog = !empty($cfg['logUpstreamErrors']);
+        self::$useErrorLog = !empty($cfg['logErrors']);
     }
 
     public static function reset(): void
@@ -42,14 +42,30 @@ class Log
      */
     public static function warning(string $message, array $context = []): void
     {
-        if (self::$logger !== null && method_exists(self::$logger, 'warning')) {
-            self::$logger->warning($message, $context);
+        self::log('WARNING', 'warning', $message, $context);
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     */
+    public static function error(string $message, array $context = []): void
+    {
+        self::log('ERROR', 'error', $message, $context);
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     */
+    private static function log(string $level, string $method, string $message, array $context): void
+    {
+        if (self::$logger !== null && method_exists(self::$logger, $method)) {
+            self::$logger->{$method}($message, $context);
 
             return;
         }
 
         if (self::$useErrorLog) {
-            self::writeErrorLog('WARNING', $message, $context);
+            self::writeErrorLog($level, $message, $context);
         }
     }
 

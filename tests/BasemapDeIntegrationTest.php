@@ -21,11 +21,11 @@ class BasemapDeIntegrationTest extends TestCase
         $styleResponse = MapboxStyleProxy::handleRequest($cfg, '/map-assets/styles/city-default.json');
         $this->assertSame('application/json', $styleResponse->mimeType);
 
-        $style = json_decode($styleResponse->data, true, 512, JSON_THROW_ON_ERROR);
+        $style = json_decode($styleResponse->body, true, 512, JSON_THROW_ON_ERROR);
         $this->assertSame('/map-assets/tilejson/city-default/smarttiles_de.json', $style['sources']['smarttiles_de']['url']);
         $this->assertStringStartsWith('/map-assets/sprites/city-default/', $style['sprite']);
         $this->assertStringStartsWith('/map-assets/glyphs/city-default/', $style['glyphs']);
-        $this->assertStringNotContainsString('sgx.geodatenzentrum.de', $styleResponse->data);
+        $this->assertStringNotContainsString('sgx.geodatenzentrum.de', $styleResponse->body);
         $this->assertSame(
             'City map attribution, Darstellung verandert',
             $style['metadata']['mapsight:attribution']
@@ -41,20 +41,20 @@ class BasemapDeIntegrationTest extends TestCase
 
         $tileJsonResponse = MapboxStyleProxy::handleRequest($cfg, '/map-assets/tilejson/city-default/smarttiles_de.json');
         $this->assertSame('application/json', $tileJsonResponse->mimeType);
-        $tileJson = json_decode($tileJsonResponse->data, true, 512, JSON_THROW_ON_ERROR);
+        $tileJson = json_decode($tileJsonResponse->body, true, 512, JSON_THROW_ON_ERROR);
         $this->assertSame('/map-assets/tiles/city-default/smarttiles_de/0/{z}/{x}/{y}.pbf', $tileJson['tiles'][0]);
 
         $tileResponse = MapboxStyleProxy::handleRequest($cfg, '/map-assets/tiles/city-default/smarttiles_de/0/0/0/0.pbf');
         $this->assertSame('application/x-protobuf', $tileResponse->mimeType);
-        $this->assertGreaterThan(1000, strlen($tileResponse->data));
+        $this->assertGreaterThan(1000, strlen($tileResponse->body));
 
         $spriteJsonResponse = MapboxStyleProxy::handleRequest($cfg, $style['sprite'] . '.json');
         $this->assertSame('application/json', $spriteJsonResponse->mimeType);
-        $this->assertGreaterThan(1000, strlen($spriteJsonResponse->data));
+        $this->assertGreaterThan(1000, strlen($spriteJsonResponse->body));
 
         $spritePngResponse = MapboxStyleProxy::handleRequest($cfg, $style['sprite'] . '.png');
         $this->assertSame('image/png', $spritePngResponse->mimeType);
-        $this->assertGreaterThan(1000, strlen($spritePngResponse->data));
+        $this->assertGreaterThan(1000, strlen($spritePngResponse->body));
 
         $glyphPath = str_replace(
             ['{fontstack}', '{range}'],
@@ -63,7 +63,7 @@ class BasemapDeIntegrationTest extends TestCase
         );
         $glyphResponse = MapboxStyleProxy::handleRequest($cfg, $glyphPath);
         $this->assertSame('application/x-protobuf', $glyphResponse->mimeType);
-        $this->assertGreaterThan(1000, strlen($glyphResponse->data));
+        $this->assertGreaterThan(1000, strlen($glyphResponse->body));
     }
 
     protected function setUp(): void
@@ -80,7 +80,7 @@ class BasemapDeIntegrationTest extends TestCase
     {
         return [
             'cacheServerPath' => $this->cacheDir,
-            'publicBasePath' => '/map-assets',
+            'mapAssetBasePath' => '/map-assets',
             'styles' => [
                 'city-default' => [
                     'upstreamStyleUrl' => 'https://sgx.geodatenzentrum.de/gdz_basemapde_vektor/styles/bm_web_col.json',
