@@ -27,9 +27,11 @@ jobs:
         uses: shivammathur/setup-php@9e72090525849c5e82e596468b86eb55e9cc5401 # 2.32.0
         with:
           php-version: '8.2'
-          extensions: mbstring, xml, soap
+          extensions: mbstring, xml, soap, gd
       - name: Install dependencies
         run: composer install --no-progress --prefer-dist
+      - name: Run static analysis
+        run: composer analyse
       - name: Run tests
         run: composer test
 
