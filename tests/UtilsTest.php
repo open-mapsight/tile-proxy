@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace OpenMapsight\TileProxy\Tests;
 
+use JsonException;
 use OpenMapsight\TileProxy\Utils;
 use PHPUnit\Framework\TestCase;
 
@@ -25,6 +26,19 @@ class UtilsTest extends TestCase
         ];
 
         $this->assertEquals($expected, Utils::parseJsoncString($jsonc));
+    }
+
+    public function testParseJsoncStringThrowsOnInvalidJson(): void
+    {
+        $this->expectException(JsonException::class);
+        Utils::parseJsoncString('{ "key": invalid }');
+    }
+
+    public function testParseJsoncStringRequiresObjectRoot(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Configuration JSON must be an object');
+        Utils::parseJsoncString('"just a string"');
     }
 
     public function testAssertImageMimeTypePassesForSupportedTypes(): void

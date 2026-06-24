@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace OpenMapsight\TileProxy;
 
+use JsonException;
 use RuntimeException;
 
 class Utils
@@ -16,17 +17,29 @@ class Utils
         'image/webp',
     ];
 
-    public static function parseJsoncString($str)
+    /**
+     * @throws JsonException
+     */
+    public static function parseJsoncString(string $str): array
     {
         // support jsonc; remove comments
         // https://www.php.net/manual/en/function.json-decode.php#112735
-        $str = preg_replace(
+        $json = preg_replace(
             '#(/\*([^*]|[\r\n]|(\*+([^*/]|[\r\n])))*\*+/)|([\s\t]//.*)|(^//.*)#',
             '',
             $str
         );
 
-        return json_decode($str, true);
+        if (!is_string($json)) {
+            throw new RuntimeException('Could not strip JSONC comments');
+        }
+
+        $decoded = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($decoded)) {
+            throw new RuntimeException('Configuration JSON must be an object');
+        }
+
+        return $decoded;
     }
 
     public static function assertImageMimeType(string $mimeType): void
