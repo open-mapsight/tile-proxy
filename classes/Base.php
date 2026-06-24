@@ -14,6 +14,10 @@ class Base
     ): void
     {
         $cfg = file_get_contents($cfgPath);
+        if ($cfg === false) {
+            throw new RuntimeException('Could not read config file "' . $cfgPath . '"');
+        }
+
         $cfg = Utils::parseJsoncString($cfg);
         static::run($cfg, $processorClass);
     }
@@ -37,9 +41,6 @@ class Base
 
                 if (10 <= $lockTry) {
                     if (isset($cfg['yoloOnLockTimeout']) && $cfg['yoloOnLockTimeout'] === true) {
-                        // YOLO: we just proceed without a lock, what could possibly go wrong?
-                        // TODO: add logging to a separate file?
-                        // @\fwrite(STDERR, 'Yoloed lock for "' . $metadataPath . '"'."\n");
                         @error_log('Yoloed lock for "' . $metadataPath . '"' . "\n");
                         break;
                     }
@@ -68,47 +69,13 @@ class Base
                 }
 
                 $res->checkpointCache();
-                $data = $res->getData();
-
-                // do not move into finally to not save broken state on failure. call `save` in
-                // your code if you want to save
                 Metadata::save($meta);
+                $response = static::buildTileResponse($res);
             } finally {
                 flock($lockH, LOCK_UN);
             }
 
-            if ($data === null) {
-                header('HTTP/1.0 404 Not Found', true, 404);
-                echo 'tile not found';
-            } else {
-                assert($res->mimeType !== null);
-
-                $time = time();
-
-                $mTime = $res->getCacheMTime();
-
-                header('Content-Type: ' . $res->mimeType);
-
-                if ($res->cacheBrowserTtl !== null) {
-                    header('Expires: ' . gmdate('D, d M Y H:i:s', $time + $res->cacheBrowserTtl) . ' GMT');
-                    header('Cache-Control: public, max-age=' . $res->cacheBrowserTtl);
-                }
-
-                if ($mTime !== null) {
-                    header('Last-Modified: ' . gmdate('D, d M Y H:i:s', $mTime) . ' GMT');
-                }
-
-                if (
-                    !empty($_SERVER['HTTP_IF_MODIFIED_SINCE']) &&
-                    $mTime !== null &&
-                    $mTime <= @strtotime($_SERVER['HTTP_IF_MODIFIED_SINCE'])
-                ) {
-                    header('HTTP/1.1 304 Not Modified');
-                } else {
-                    header('Content-Length: ' . strlen($data));
-                    echo $data;
-                }
-            }
+            static::sendTileResponse($response);
         } catch (UserException $e) {
             header('HTTP/1.0 400 Bad Request', true, 400);
             echo $e->getMessage();
@@ -122,7 +89,63 @@ class Base
         }
     }
 
-    /** @return array<string, string> */
+    public static function buildTileResponse(Result $res): TileResponse
+    {
+        $data = $res->getData();
+        if ($data === null) {
+            return new TileResponse(null, null, null, null);
+        }
+
+        assert($res->mimeType !== null);
+
+        $mTime = $res->getCacheMTime();
+        $notModified = !empty($_SERVER['HTTP_IF_MODIFIED_SINCE'])
+            && $mTime !== null
+            && $mTime <= @strtotime($_SERVER['HTTP_IF_MODIFIED_SINCE']);
+
+        return new TileResponse(
+            $notModified ? null : $data,
+            $res->mimeType,
+            $res->cacheBrowserTtl,
+            $mTime,
+            $notModified
+        );
+    }
+
+    public static function sendTileResponse(TileResponse $response): void
+    {
+        if ($response->isNotFound()) {
+            header('HTTP/1.0 404 Not Found', true, 404);
+            echo 'tile not found';
+            return;
+        }
+
+        assert($response->mimeType !== null);
+
+        $time = time();
+
+        header('Content-Type: ' . $response->mimeType);
+
+        if ($response->cacheBrowserTtl !== null) {
+            header('Expires: ' . gmdate('D, d M Y H:i:s', $time + $response->cacheBrowserTtl) . ' GMT');
+            header('Cache-Control: public, max-age=' . $response->cacheBrowserTtl);
+        }
+
+        if ($response->cacheMTime !== null) {
+            header('Last-Modified: ' . gmdate('D, d M Y H:i:s', $response->cacheMTime) . ' GMT');
+        }
+
+        if ($response->notModified) {
+            header('HTTP/1.1 304 Not Modified');
+            return;
+        }
+
+        assert($response->body !== null);
+        header('Content-Length: ' . strlen($response->body));
+        echo $response->body;
+    }
+
+    /** @return array<string, string|null> */
     protected static function getReqArgs(array $cfg): array
     {
         $prefix = (static function () use ($cfg) {
@@ -145,7 +168,7 @@ class Base
             'x' => (string)$_GET['x'],
             'y' => (string)$_GET['y'],
             'z' => (string)$_GET['z'],
-            'prefix' => (string)$prefix,
+            'prefix' => $prefix !== null ? (string)$prefix : null,
         ];
     }
 

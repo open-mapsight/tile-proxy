@@ -75,11 +75,8 @@ class Result
 
             Utils::writeToFile($path, $this->data);
 
-            $this->cacheMTime = @filemtime($path);
-            if ($this->cacheMTime === false) {
-                // fallback
-                $this->cacheMTime = time();
-            }
+            $mtime = @filemtime($path);
+            $this->cacheMTime = $mtime === false ? time() : $mtime;
         }
 
         ++$this->cacheStep;
