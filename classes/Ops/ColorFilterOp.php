@@ -13,6 +13,10 @@ class ColorFilterOp implements OpHandler
     public function __invoke(callable $next, array $cfg, Result $res): Result
     {
         if (!$res->isFromCache()) {
+            if (!extension_loaded('imagick')) {
+                throw new RuntimeException('colorFilter requires the imagick PHP extension');
+            }
+
             Utils::assertImageMimeType($res->mimeType);
 
             $data = (static function () use ($cfg, $res) {

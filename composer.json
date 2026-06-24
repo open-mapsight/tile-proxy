@@ -23,25 +23,26 @@
     "require": {
         "php": "^8.2.0",
         "ext-gd": "*",
-        "ext-imagick": "*",
         "ext-json": "*",
         "guzzlehttp/guzzle": "^7.0",
-        "spatie/image-optimizer": "^1.8.1",
-        "symfony/polyfill-php83": "^1.37.0",
-        "symfony/polyfill-php84": "^1.37.0",
-        "symfony/polyfill-php85": "^1.37.0"
+        "spatie/image-optimizer": "^1.8.1"
+    },
+    "suggest": {
+        "ext-imagick": "Required for colorFilter tile operations"
     },
     "scripts": {
-        "test": "phpunit"
+        "test": "phpunit",
+        "analyse": "phpstan analyse --configuration=phpstan.neon.dist --memory-limit=512M"
     },
     "config": {
         "sort-packages": true
     },
-    "minimum-stability": "dev",
+    "minimum-stability": "stable",
     "prefer-stable": true,
     "require-dev": {
         "roave/security-advisories": "dev-master",
         "friendsofphp/php-cs-fixer": "^3.95",
+        "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^11.0",
         "rector/rector": "^2.4"
     },
@@ -65,7 +66,6 @@
     "platform": {
         "php": "^8.2.99",
         "ext-gd": "*",
-        "ext-json": "*",
-        "ext-imagick": "*"
+        "ext-json": "*"
     }
 }
