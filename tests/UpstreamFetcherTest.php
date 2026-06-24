@@ -21,13 +21,6 @@ class UpstreamFetcherTest extends TestCase
         $this->assertFalse($result->transportFailed);
     }
 
-    public function testFetchMissingFileFails(): void
-    {
-        $result = UpstreamFetcher::fetch('file://' . $this->tempDir . '/missing.png');
-
-        $this->assertFalse($result->isSuccess());
-    }
-
     public function testGuzzleOptionsFromUpstreamHttpConfig(): void
     {
         $options = UpstreamFetcher::guzzleOptionsFromHttpConfig([
@@ -47,6 +40,19 @@ class UpstreamFetcherTest extends TestCase
         $this->assertFalse($options['allow_redirects']);
         $this->assertSame('application/json', $options['headers']['Accept']);
         $this->assertSame('tile-proxy-test', $options['headers']['User-Agent']);
+    }
+
+    public function testFetchMissingFileFails(): void
+    {
+        $result = UpstreamFetcher::fetch('file://' . $this->tempDir . '/missing.png');
+
+        $this->assertFalse($result->isSuccess());
+    }
+
+    public function testMatchesContentTypeIgnoresParameters(): void
+    {
+        $this->assertTrue(UpstreamFetcher::matchesContentType('image/png; charset=binary', 'image/png'));
+        $this->assertFalse(UpstreamFetcher::matchesContentType('application/json', 'image/png'));
     }
 
     protected function setUp(): void

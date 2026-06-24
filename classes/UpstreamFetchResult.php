@@ -9,12 +9,15 @@ class UpstreamFetchResult
         public readonly ?string $body,
         public readonly ?int    $statusCode,
         public readonly bool    $transportFailed,
+        public readonly bool    $contentTypeMismatch = false,
     )
     {
     }
 
     public function isSuccess(): bool
     {
-        return !$this->transportFailed && $this->body !== null;
+        return !$this->transportFailed
+            && !$this->contentTypeMismatch
+            && $this->body !== null;
     }
 }

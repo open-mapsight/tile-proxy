@@ -8,10 +8,17 @@ use GuzzleHttp\Exception\GuzzleException;
 
 class UpstreamFetcher
 {
+    private static ?Client $httpClient = null;
+
     /**
      * @param array<string, mixed> $httpConfig `upstreamHttp` configuration
      */
-    public static function fetch(string $url, array $httpConfig = [], ?string $acceptMimeType = null): UpstreamFetchResult
+    public static function fetch(
+        string  $url,
+        array   $httpConfig = [],
+        ?string $acceptMimeType = null,
+        ?string $expectedContentType = null
+    ): UpstreamFetchResult
     {
         if (parse_url($url, PHP_URL_SCHEME) === 'file') {
             $content = @file_get_contents($url);
@@ -23,25 +30,40 @@ class UpstreamFetcher
         }
 
         try {
-            $options = static::guzzleOptionsFromHttpConfig($httpConfig);
+            $options = self::guzzleOptionsFromHttpConfig($httpConfig);
 
             if ($acceptMimeType !== null) {
                 $options['headers'] ??= [];
                 $options['headers']['Accept'] = $acceptMimeType;
             }
 
-            $client = new Client(['http_errors' => false]);
-            $response = $client->request('GET', $url, $options);
+            $response = self::httpClient()->request('GET', $url, $options);
             $statusCode = $response->getStatusCode();
 
             if (400 <= $statusCode) {
                 return new UpstreamFetchResult(null, $statusCode, false);
             }
 
+            $contentType = $response->getHeaderLine('Content-Type');
+            if (
+                $expectedContentType !== null
+                && !self::matchesContentType($contentType, $expectedContentType)
+            ) {
+                return new UpstreamFetchResult(null, $statusCode, false, true);
+            }
+
             return new UpstreamFetchResult((string)$response->getBody(), $statusCode, false);
         } catch (GuzzleException) {
             return new UpstreamFetchResult(null, null, true);
         }
+    }
+
+    public static function matchesContentType(string $header, string $expected): bool
+    {
+        $actual = strtolower(trim(explode(';', $header)[0]));
+        $expected = strtolower(trim(explode(';', $expected)[0]));
+
+        return $actual === $expected;
     }
 
     /**
@@ -83,5 +105,10 @@ class UpstreamFetcher
         }
 
         return $options;
+    }
+
+    private static function httpClient(): Client
+    {
+        return self::$httpClient ??= new Client(['http_errors' => false]);
     }
 }
