@@ -9,27 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `UpstreamFetcher` and `UpstreamFetchResult` for shared upstream HTTP fetching via Guzzle.
-- `upstreamHttp` configuration for proxy, timeouts, redirects, and request headers.
-- Tile pipeline op handlers in `OpenMapsight\TileProxy\Ops\` (`SrcOp`, `ColorFilterOp`, `ImgOptOp`, `MergeOp`).
-- Unit tests for `UpstreamFetcher`.
+- Root-level `upstreamHttp` configuration for proxy, timeouts, redirects, and request headers. When set, it applies to tile source fetches and `MapboxStyleProxy` unless a `src` operation defines its own `upstreamHttp` block.
 
 ### Changed
 
-- `Processor` is now a thin pipeline orchestrator; op implementations live in dedicated handler classes.
-- Tile `src` fetches and `MapboxStyleProxy` asset fetches both use `UpstreamFetcher`.
-- Root-level `upstreamHttp` is passed from `Base::run()` into tile pipelines and merge sub-pipelines.
+- **Breaking:** tile source HTTP options use `upstreamHttp` instead of PHP `streamContext` (see migration below). Per-op overrides on `src` operations are still supported.
+- `ext-imagick` is no longer a required dependency; install it only when using `colorFilter` ops (missing extension throws a clear runtime error).
+- Upstream responses with an unexpected `Content-Type` are treated as fetch failures.
+- Invalid JSONC config and failed cache file writes now throw exceptions instead of failing silently.
+- `cacheBrowserTtlFail` on `src` ops defaults to 300 seconds when omitted.
 
 ### Removed
 
-- Per-op `streamContext` support for tile source fetches.
+- Per-op `streamContext` on tile `src` operations (replaced by `upstreamHttp`).
 
 ### Migration from 1.x
 
-Replace PHP `streamContext` blocks on `src` operations with root-level `upstreamHttp`:
+Rename `streamContext` to `upstreamHttp` and convert PHP stream-context keys to Guzzle-style options. You can set shared defaults at the config root, keep per-`src` overrides, or both:
 
 ```jsonc
-// before (1.x)
+// before (1.x) — per-op only
 "ops": [{
     "cacheServerName": "source-1",
     "urls": ["https://example.com/tiles/{z}/{x}/{y}.png"],
@@ -42,7 +41,7 @@ Replace PHP `streamContext` blocks on `src` operations with root-level `upstream
     }
 }]
 
-// after (2.x)
+// after (2.x) — shared defaults at root
 "upstreamHttp": {
     "proxy": "tcp://proxy.example.com:8080",
     "timeout": 30,
@@ -54,9 +53,33 @@ Replace PHP `streamContext` blocks on `src` operations with root-level `upstream
     "cacheServerName": "source-1",
     "urls": ["https://example.com/tiles/{z}/{x}/{y}.png"]
 }]
+
+// after (2.x) — per-src override (same as 1.x, new format)
+"upstreamHttp": {
+    "timeout": 30,
+    "headers": {
+        "User-Agent": "mapsight-tile-proxy"
+    }
+},
+"ops": [{
+    "cacheServerName": "corp-tiles",
+    "urls": ["https://tiles.internal.example/{z}/{x}/{y}.png"],
+    "upstreamHttp": {
+        "proxy": "tcp://corp-proxy.example.com:8080",
+        "timeout": 30,
+        "headers": {
+            "User-Agent": "mapsight-tile-proxy"
+        }
+    }
+}, {
+    "cacheServerName": "public-tiles",
+    "urls": ["https://tiles.example.com/{z}/{x}/{y}.png"]
+}]
 ```
 
-Use the same `upstreamHttp` block for Mapbox style proxy deployments.
+In the per-src example, `corp-tiles` uses its own `upstreamHttp` block; `public-tiles` inherits the root defaults. Use separate `src` operations (including in `merge` sub-pipelines) when different upstreams need different HTTP settings.
+
+Use the same root `upstreamHttp` block for Mapbox style proxy deployments.
 
 ## [1.1.0] - 2026-06-22
 

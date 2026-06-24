@@ -40,7 +40,9 @@ The configuration defines the behavior of the proxy.
 ### Upstream HTTP settings
 
 Both the tile `src` operation and `MapboxStyleProxy` use the same optional `upstreamHttp` configuration for outbound
-requests. HTTP(S) fetches go through Guzzle; `file://` URLs are read from disk.
+requests. HTTP(S) fetches go through Guzzle; `file://` URLs are read from disk. Supported keys map to
+[Guzzle request options](https://docs.guzzlephp.org/en/stable/request-options.html): `proxy`, `timeout`,
+`connect_timeout`, `allow_redirects`, and `headers`.
 
 ```jsonc
 "upstreamHttp": {
