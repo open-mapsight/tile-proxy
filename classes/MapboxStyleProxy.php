@@ -393,8 +393,8 @@ class MapboxStyleProxy
             }
         }
 
-        $data = @file_get_contents($upstreamUrl);
-        if ($data === false) {
+        $fetchResult = UpstreamFetcher::fetch($upstreamUrl, $cfg['upstreamHttp'] ?? []);
+        if (!$fetchResult->isSuccess()) {
             if ($cacheMTime !== false) {
                 $cachedData = @file_get_contents($cachePath);
                 if ($cachedData !== false) {
@@ -404,6 +404,8 @@ class MapboxStyleProxy
 
             throw new UserException('Could not fetch upstream map asset');
         }
+
+        $data = $fetchResult->body;
 
         Utils::writeToFile($cachePath, $data);
 

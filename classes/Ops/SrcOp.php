@@ -4,14 +4,13 @@ declare(strict_types=1);
 namespace OpenMapsight\TileProxy\Ops;
 
 use OpenMapsight\TileProxy\Result;
+use OpenMapsight\TileProxy\UpstreamFetcher;
 use RuntimeException;
 
 class SrcOp implements OpHandler
 {
     public function __invoke(callable $next, array $cfg, Result $res): Result
     {
-        global $http_response_header;
-
         $res->mimeType = $cfg['mimeType'];
         $res->cacheBrowserTtl = $cfg['cacheBrowserTtl'];
 
@@ -48,38 +47,23 @@ class SrcOp implements OpHandler
 
         if ($invalidateCache) {
             $url = $this->getSrcUrl($cfg, $res);
-            // TODO: send `Accept` header with expected mimetype
-            // TODO: check that the mimetype matches the expected mimetype
-
-            $httpResponseHeaderBefore = $http_response_header ?? null;
-
-            $content = @file_get_contents(
+            $fetchResult = UpstreamFetcher::fetch(
                 $url,
-                false,
-                stream_context_create($cfg['streamContext'] ?? [])
+                $cfg['upstreamHttp'] ?? [],
+                $cfg['mimeType'] ?? null
             );
 
-            $httpResCode = null;
+            if (!$fetchResult->isSuccess()) {
+                $httpResCode = $fetchResult->statusCode;
 
-            if ($http_response_header !== $httpResponseHeaderBefore) {
-                // $http_response_header contains our response & `file_get_contents` was an
-                // http request
-
-                // https://www.php.net/manual/en/reserved.variables.httpresponseheader.php
-                preg_match('/^HTTP\/[\d.]+ (\d{3}) /', $http_response_header[0], $matches);
-
-                $httpResCode = $matches[1] ?? null;
-            }
-
-            if ($content === false) {
-                if (400 <= $httpResCode && $httpResCode <= 499) {
+                if ($httpResCode !== null && 400 <= $httpResCode && $httpResCode <= 499) {
                     $res->getMetadata()->last4xx = time();
-                } else if (500 <= $httpResCode && $httpResCode <= 599) {
+                } else if ($httpResCode !== null && 500 <= $httpResCode && $httpResCode <= 599) {
                     $res->getMetadata()->last5xx = time();
                     $res->cacheBrowserTtl = $cfg['cacheBrowserTtlFail'];
                 }
             } else {
-                $res->setData($content);
+                $res->setData($fetchResult->body);
             }
         }
 

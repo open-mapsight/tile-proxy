@@ -32,9 +32,30 @@ The configuration defines the behavior of the proxy.
 
 * `cacheServerPath`: Base directory for caching tiles.
 * `ops`: A list of operations to perform on the tiles.
+* `upstreamHttp`: (Optional) Shared HTTP client settings for upstream fetches in tile and Mapbox style proxying.
 * `debug`: (Optional) If set to `true`, outputs exceptions in the browser.
 * `prefixArgName`: (Optional) Name of the GET parameter to use for prefixing (e.g., to support different map styles).
 * `allowedPrefixes`: (Optional) List of allowed values for the prefix argument.
+
+### Upstream HTTP settings
+
+Both the tile `src` operation and `MapboxStyleProxy` use the same optional `upstreamHttp` configuration for outbound
+requests. HTTP(S) fetches go through Guzzle; `file://` URLs are read from disk.
+
+```jsonc
+"upstreamHttp": {
+    "proxy": "tcp://proxy.example.com:8080",
+    "timeout": 30,
+    "connect_timeout": 10,
+    "allow_redirects": true,
+    "headers": {
+        "User-Agent": "mapsight-tile-proxy"
+    }
+}
+```
+
+For tile pipelines, set `upstreamHttp` at the root of the config. A `src` operation can override it with its own
+`upstreamHttp` block.
 
 ### Operation Pipeline (Chaining)
 
@@ -92,6 +113,10 @@ Example configuration:
 {
     "cacheServerPath": "/var/cache/mapsight-tile-proxy",
     "publicBasePath": "/map-assets",
+    "upstreamHttp": {
+        "proxy": "tcp://proxy.example.com:8080",
+        "timeout": 30
+    },
     "styles": {
         "city-default": {
             "upstreamStyleUrl": "https://example.com/styles/base.json",

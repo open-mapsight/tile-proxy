@@ -87,7 +87,7 @@ class MockProcessor extends Processor
 {
     public static bool $called = false;
 
-    public static function run(array $ops, array $reqArgs, string $cachePath, MetadataScope $meta): Result
+    public static function run(array $ops, array $reqArgs, string $cachePath, MetadataScope $meta, array $upstreamHttp = []): Result
     {
         self::$called = true;
         // Return a dummy result that prevents further side effects in Base::run

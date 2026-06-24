@@ -21,10 +21,11 @@
         "source": "https://github.com/open-mapsight/mapsight-tile-proxy"
     },
     "require": {
-        "ext-gd": "*",
-        "ext-json": "*",
-        "ext-imagick": "*",
         "php": "^8.2.0",
+        "ext-gd": "*",
+        "ext-imagick": "*",
+        "ext-json": "*",
+        "guzzlehttp/guzzle": "^7.0",
         "spatie/image-optimizer": "^1.8.1",
         "symfony/polyfill-php83": "^1.37.0",
         "symfony/polyfill-php84": "^1.37.0",

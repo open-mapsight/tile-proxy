@@ -12,9 +12,11 @@ class MergeOp implements OpHandler
 {
     /**
      * @param class-string<Processor> $processorClass
+     * @param array<string, mixed>    $upstreamHttp
      */
     public function __construct(
-        private readonly string $processorClass
+        private readonly string $processorClass,
+        private readonly array  $upstreamHttp = [],
     )
     {
     }
@@ -31,7 +33,8 @@ class MergeOp implements OpHandler
             $cfg['ops'],
             $res->getReqArgs(),
             $res->getCachePath(),
-            $res->getMetadata()
+            $res->getMetadata(),
+            $this->upstreamHttp
         );
 
         if ($subRes->failure !== null) {

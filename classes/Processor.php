@@ -25,7 +25,7 @@ class Processor
         ];
     }
 
-    protected static function createOpHandler(string $op): OpHandler
+    protected static function createOpHandler(string $op, array $upstreamHttp = []): OpHandler
     {
         $handlers = static::getOpHandlers();
 
@@ -36,7 +36,7 @@ class Processor
         $handlerClass = $handlers[$op];
 
         if ($handlerClass === MergeOp::class) {
-            return new MergeOp(static::class);
+            return new MergeOp(static::class, $upstreamHttp);
         }
 
         return new $handlerClass();
@@ -49,7 +49,8 @@ class Processor
         array         $ops,
         array         $reqArgs,
         string        $cachePath,
-        MetadataScope $meta
+        MetadataScope $meta,
+        array         $upstreamHttp = []
     ): Result
     {
         // yeah php, it's a list...
@@ -79,7 +80,12 @@ class Processor
                 );
 
                 try {
-                    return (new SrcOp())($next, $opCfg, $res);
+                    $srcCfg = $opCfg;
+                    if (!isset($srcCfg['upstreamHttp']) && $upstreamHttp !== []) {
+                        $srcCfg['upstreamHttp'] = $upstreamHttp;
+                    }
+
+                    return (new SrcOp())($next, $srcCfg, $res);
                 } catch (Exception $err) {
                     $res->failure = $err;
                     return $res;
@@ -89,7 +95,7 @@ class Processor
             $op = $opCfg['op'];
             unset($opCfg['op']);
 
-            $handler = static::createOpHandler($op);
+            $handler = static::createOpHandler($op, $upstreamHttp);
 
             $next = static function ($res) use ($handler, $next, $opCfg) {
                 return $handler($next, $opCfg, $res);

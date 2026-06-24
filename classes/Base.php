@@ -59,7 +59,8 @@ class Base
                     $cfg['ops'],
                     $reqArgs,
                     $cachePath,
-                    new MetadataScope($meta, '')
+                    new MetadataScope($meta, ''),
+                    $cfg['upstreamHttp'] ?? []
                 );
 
                 if ($res->failure !== null) {
