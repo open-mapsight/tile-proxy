@@ -55,6 +55,9 @@ The configuration defines the behavior of the proxy.
 * `ops`: (Raster tiles) Operation pipeline for bitmap tile requests.
 * `mapAssetBasePath`: (Mapbox styles) URL path prefix for proxied style JSON, vector tiles, sprites, and glyphs.
 * `styles`: (Mapbox styles) Named style configurations for `MapboxStyleProxy`.
+* `laxContentTypes`: (Mapbox styles) When `true`, accept `application/octet-stream` for vector tile and glyph
+  upstream responses in addition to the expected protobuf type. Set per style or at the config root. Can also be an
+  array of additional MIME types to accept for any validated upstream fetch in that style.
 * `upstreamHttp`: (Optional) Shared HTTP client settings for upstream fetches in tile and Mapbox style proxying.
 * `logErrors`: (Optional) If set to `true`, log upstream fetch warnings and request handler failures to PHP's `error_log`.
 * `prefixArgName`: (Optional) Name of the GET parameter to use for prefixing (e.g., to support different map styles).
@@ -289,6 +292,7 @@ Example configuration:
                 "/sprites/",
                 "/fonts/"
             ],
+            "laxContentTypes": true,
             "cacheTtls": {
                 "style": 86400,
                 "tilejson": 86400,

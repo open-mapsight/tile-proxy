@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `laxContentTypes` configuration for Mapbox style proxying. When enabled, vector tile and glyph fetches also accept
+  `application/octet-stream` upstream responses. Supports a boolean or a list of additional MIME types per style.
+
 ## [2.1.0] - 2026-06-25
 
 ### Added

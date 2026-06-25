@@ -17,7 +17,8 @@ class UpstreamFetcher
         string  $url,
         array   $httpConfig = [],
         ?string $acceptMimeType = null,
-        ?string $expectedContentType = null
+        ?string $expectedContentType = null,
+        array   $alternateContentTypes = []
     ): UpstreamFetchResult
     {
         if (parse_url($url, PHP_URL_SCHEME) === 'file') {
@@ -49,11 +50,12 @@ class UpstreamFetcher
             $contentType = $response->getHeaderLine('Content-Type');
             if (
                 $expectedContentType !== null
-                && !self::matchesContentType($contentType, $expectedContentType)
+                && !self::matchesAnyContentType($contentType, $expectedContentType, $alternateContentTypes)
             ) {
                 self::logWarning('Upstream content type mismatch', [
                     'url' => $url,
                     'expected' => $expectedContentType,
+                    'alternates' => $alternateContentTypes,
                     'actual' => $contentType,
                     'statusCode' => $statusCode,
                 ]);
@@ -92,6 +94,24 @@ class UpstreamFetcher
         $expected = strtolower(trim(explode(';', $expected)[0]));
 
         return $actual === $expected;
+    }
+
+    /**
+     * @param list<string> $alternates
+     */
+    public static function matchesAnyContentType(string $header, ?string $expected, array $alternates = []): bool
+    {
+        if ($expected !== null && self::matchesContentType($header, $expected)) {
+            return true;
+        }
+
+        foreach ($alternates as $alternate) {
+            if (self::matchesContentType($header, $alternate)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

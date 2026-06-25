@@ -55,6 +55,24 @@ class UpstreamFetcherTest extends TestCase
         $this->assertFalse(UpstreamFetcher::matchesContentType('application/json', 'image/png'));
     }
 
+    public function testMatchesAnyContentTypeAcceptsAlternate(): void
+    {
+        $this->assertTrue(UpstreamFetcher::matchesAnyContentType(
+            'application/octet-stream',
+            'application/x-protobuf',
+            ['application/octet-stream']
+        ));
+    }
+
+    public function testMatchesAnyContentTypeRejectsWhenNeitherMatches(): void
+    {
+        $this->assertFalse(UpstreamFetcher::matchesAnyContentType(
+            'application/json',
+            'application/x-protobuf',
+            ['application/octet-stream']
+        ));
+    }
+
     protected function setUp(): void
     {
         $this->tempDir = sys_get_temp_dir() . '/upstream_fetcher_test_' . uniqid();

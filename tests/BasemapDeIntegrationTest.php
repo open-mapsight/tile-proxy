@@ -91,6 +91,7 @@ class BasemapDeIntegrationTest extends TestCase
                         '/gdz_basemapde_vektor/sprites/',
                         '/gdz_basemapde_vektor/fonts/',
                     ],
+                    'laxContentTypes' => true,
                     'cacheTtls' => [
                         'style' => 86400,
                         'tilejson' => 86400,
