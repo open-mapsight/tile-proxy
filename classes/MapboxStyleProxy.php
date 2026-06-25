@@ -317,6 +317,7 @@ class MapboxStyleProxy
         $cachePath = self::getCachePath($cfg, $styleName, $resourceType, $upstreamUrl);
         $cacheTtl = self::getCacheTtl($styleCfg, $resourceType);
         $expectedContentType = self::expectedContentTypeFor($resourceType, $upstreamUrl);
+        $alternateContentTypes = self::alternateContentTypesFor($cfg, $styleCfg, $resourceType);
 
         $cached = DiskCache::readFresh($cachePath, $cacheTtl);
         if ($cached !== null) {
@@ -327,7 +328,8 @@ class MapboxStyleProxy
             $upstreamUrl,
             $cfg['upstreamHttp'] ?? [],
             $expectedContentType,
-            $expectedContentType
+            $expectedContentType,
+            $alternateContentTypes
         );
         if (!$fetchResult->isSuccess()) {
             $stale = DiskCache::read($cachePath);
@@ -350,6 +352,27 @@ class MapboxStyleProxy
             'tile', 'glyph' => 'application/x-protobuf',
             'sprite' => str_ends_with($upstreamUrl, '.png') ? 'image/png' : 'application/json',
             default => null,
+        };
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function alternateContentTypesFor(array $cfg, array $styleCfg, string $resourceType): array
+    {
+        $lax = $styleCfg['laxContentTypes'] ?? $cfg['laxContentTypes'] ?? false;
+
+        if (is_array($lax)) {
+            return array_values(array_filter($lax, 'is_string'));
+        }
+
+        if ($lax !== true) {
+            return [];
+        }
+
+        return match ($resourceType) {
+            'tile', 'glyph' => ['application/octet-stream'],
+            default => [],
         };
     }
 
