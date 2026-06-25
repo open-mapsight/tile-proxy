@@ -43,6 +43,52 @@ class Processor implements PipelineRunner
     }
 
     /**
+     * @param list<array<string, mixed>> $ops
+     * @return list<array<string, mixed>>
+     */
+    protected static function filterOpsByPrefix(array $ops, ?string $prefix): array
+    {
+        $filtered = [];
+
+        foreach ($ops as $opCfg) {
+            if (!static::opMatchesPrefix($opCfg, $prefix)) {
+                continue;
+            }
+
+            unset($opCfg['prefixes']);
+            $filtered[] = $opCfg;
+        }
+
+        return $filtered;
+    }
+
+    /**
+     * @param array<string, mixed> $opCfg
+     */
+    protected static function opMatchesPrefix(array $opCfg, ?string $prefix): bool
+    {
+        if (!isset($opCfg['prefixes'])) {
+            return true;
+        }
+
+        if (!is_array($opCfg['prefixes'])) {
+            throw new RuntimeException('`prefixes` must be an array');
+        }
+
+        if ($prefix === null) {
+            return false;
+        }
+
+        foreach ($opCfg['prefixes'] as $allowedPrefix) {
+            if (!is_string($allowedPrefix)) {
+                throw new RuntimeException('`prefixes` entries must be strings');
+            }
+        }
+
+        return in_array($prefix, $opCfg['prefixes'], true);
+    }
+
+    /**
      * @throws Exception
      */
     public static function run(
@@ -54,7 +100,7 @@ class Processor implements PipelineRunner
     ): Result
     {
         // yeah php, it's a list...
-        $ops = array_values($ops);
+        $ops = static::filterOpsByPrefix(array_values($ops), $reqArgs['prefix'] ?? null);
 
         if (empty($ops)) {
             throw new RuntimeException('No ops configured');
