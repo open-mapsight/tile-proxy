@@ -7,6 +7,7 @@ use OpenMapsight\TileProxy\Metadata;
 use OpenMapsight\TileProxy\MetadataScope;
 use OpenMapsight\TileProxy\Processor;
 use PHPUnit\Framework\TestCase;
+use RuntimeException;
 
 class ProcessorTest extends TestCase
 {
@@ -103,6 +104,117 @@ class ProcessorTest extends TestCase
 
         // Current implementation will likely fail here if overlay fails
         $this->assertNull($result->failure, 'Expected graceful failure of merge');
+    }
+
+    public function testSkipsColorFilterWhenPrefixDoesNotMatch(): void
+    {
+        $ops = [
+            [
+                'cacheServerName' => 'testSource',
+                'urls' => ['file://' . $this->tileFile],
+                'mimeType' => 'image/png',
+                'cacheBrowserTtl' => 3600,
+                'cacheServerTtl' => 86400,
+            ],
+            [
+                'op' => 'colorFilter',
+                'prefixes' => ['muted'],
+                'filter' => 'reducedSaturation',
+                'cacheServerName' => 'desaturated',
+            ],
+        ];
+
+        $reqArgs = ['z' => '1', 'x' => '0', 'y' => '0', 'prefix' => 'default'];
+        $cachePath = $this->tempDir . '/cache';
+        $meta = new MetadataScope(new Metadata($this->tempDir . '/meta.json'), 'test');
+
+        $result = Processor::run($ops, $reqArgs, $cachePath, $meta);
+
+        $this->assertNull($result->failure);
+        $this->assertSame(file_get_contents($this->tileFile), $result->getData());
+    }
+
+    public function testRunsColorFilterWhenPrefixMatches(): void
+    {
+        if (!extension_loaded('imagick')) {
+            $this->markTestSkipped('Imagick not loaded, skipping colorFilter test');
+        }
+
+        $ops = [
+            [
+                'cacheServerName' => 'testSource',
+                'urls' => ['file://' . $this->tileFile],
+                'mimeType' => 'image/png',
+                'cacheBrowserTtl' => 3600,
+                'cacheServerTtl' => 86400,
+            ],
+            [
+                'op' => 'colorFilter',
+                'prefixes' => ['muted'],
+                'filter' => 'reducedSaturation',
+                'cacheServerName' => 'desaturated',
+            ],
+        ];
+
+        $reqArgs = ['z' => '1', 'x' => '0', 'y' => '0', 'prefix' => 'muted'];
+        $cachePath = $this->tempDir . '/cache';
+        $meta = new MetadataScope(new Metadata($this->tempDir . '/meta.json'), 'test');
+
+        $result = Processor::run($ops, $reqArgs, $cachePath, $meta);
+
+        $this->assertNull($result->failure);
+        $this->assertNotSame(file_get_contents($this->tileFile), $result->getData());
+    }
+
+    public function testInvalidPrefixesThrows(): void
+    {
+        $ops = [
+            [
+                'cacheServerName' => 'testSource',
+                'urls' => ['file://' . $this->tileFile],
+                'mimeType' => 'image/png',
+                'cacheBrowserTtl' => 3600,
+                'cacheServerTtl' => 86400,
+            ],
+            [
+                'op' => 'colorFilter',
+                'prefixes' => 'muted',
+                'filter' => 'reducedSaturation',
+                'cacheServerName' => 'desaturated',
+            ],
+        ];
+
+        $reqArgs = ['z' => '1', 'x' => '0', 'y' => '0', 'prefix' => 'muted'];
+        $cachePath = $this->tempDir . '/cache';
+        $meta = new MetadataScope(new Metadata($this->tempDir . '/meta.json'), 'test');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('`prefixes` must be an array');
+
+        Processor::run($ops, $reqArgs, $cachePath, $meta);
+    }
+
+    public function testAllOpsFilteredThrows(): void
+    {
+        $ops = [
+            [
+                'cacheServerName' => 'testSource',
+                'prefixes' => ['muted'],
+                'urls' => ['file://' . $this->tileFile],
+                'mimeType' => 'image/png',
+                'cacheBrowserTtl' => 3600,
+                'cacheServerTtl' => 86400,
+            ],
+        ];
+
+        $reqArgs = ['z' => '1', 'x' => '0', 'y' => '0', 'prefix' => 'default'];
+        $cachePath = $this->tempDir . '/cache';
+        $meta = new MetadataScope(new Metadata($this->tempDir . '/meta.json'), 'test');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('No ops configured');
+
+        Processor::run($ops, $reqArgs, $cachePath, $meta);
     }
 
     public function testProcessorMergeTransparency(): void

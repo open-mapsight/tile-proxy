@@ -244,6 +244,9 @@ Operations are chained sequentially as defined in the `ops` array. The first ope
 * `imgOpt`: Optimizes the image using image optimizers.
 * `merge`: Merges the current tile with another set of operations.
 
+Any operation may include an optional `prefixes` array. When set, the operation runs only when the resolved tile
+prefix (from `prefixArgName` / `defaultPrefix`) is listed. This applies to sub-pipelines inside `merge` as well.
+
 ## Mapbox Style Vector Proxy
 
 `MapboxStyleProxy` proxies named Mapbox/MapLibre style assets through same-origin URLs. It rewrites style JSON
@@ -347,6 +350,48 @@ You can layer tiles by using the `merge` operation to overlay another tile set o
         ]
     }
 ]
+```
+
+### Prefix-specific operations
+
+Use `prefixes` to run an operation only for certain map styles. For example, apply a color filter to the base map
+before merging an overlay when `prefix=muted`:
+
+```jsonc
+"ops": [
+    {
+        "cacheServerName": "base-map",
+        "urls": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+        "mimeType": "image/png",
+        "cacheBrowserTtl": 3600,
+        "cacheServerTtl": 86400
+    },
+    {
+        "op": "colorFilter",
+        "prefixes": ["muted"],
+        "filter": "reducedSaturation",
+        "cacheServerName": "desaturated"
+    },
+    {
+        "op": "merge",
+        "ops": [
+            {
+                "cacheServerName": "overlay",
+                "urls": ["https://example.com/tiles/{prefix}/{z}/{x}/{y}.png"],
+                "mimeType": "image/png",
+                "cacheBrowserTtl": 3600,
+                "cacheServerTtl": 86400
+            }
+        ]
+    },
+    {
+        "op": "imgOpt",
+        "cacheServerName": "opt-1"
+    }
+],
+"prefixArgName": "prefix",
+"allowedPrefixes": ["default", "satellite", "muted"],
+"defaultPrefix": "default"
 ```
 
 ## Development
