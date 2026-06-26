@@ -8,7 +8,7 @@
         "osm"
     ],
     "homepage": "https://github.com/open-mapsight/mapsight-tile-proxy",
-    "license": "proprietary",
+    "license": "MIT",
     "authors": [
         {
             "name": "Paul Golmann",
