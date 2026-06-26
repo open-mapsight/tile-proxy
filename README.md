@@ -420,3 +420,15 @@ with:
 ```bash
 RUN_BASEMAPDE_INTEGRATION_TESTS=1 vendor/bin/phpunit tests/BasemapDeIntegrationTest.php
 ```
+
+## License
+
+This project is **[MIT](LICENSE)**.
+
+For licensing or trademark questions, contact
+[contact@open-mapsight.org](mailto:contact@open-mapsight.org).
+
+## Community
+
+Participation in Mapsight community spaces is governed by our
+[Code of Conduct](CODE_OF_CONDUCT.md) (Contributor Covenant 3.0).
