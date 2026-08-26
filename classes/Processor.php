@@ -5,6 +5,7 @@ namespace OpenMapsight\TileProxy;
 
 use Exception;
 use OpenMapsight\TileProxy\Ops\ColorFilterOp;
+use OpenMapsight\TileProxy\Ops\ColorKeyOp;
 use OpenMapsight\TileProxy\Ops\EncodeOp;
 use OpenMapsight\TileProxy\Ops\ImgOptOp;
 use OpenMapsight\TileProxy\Ops\MergeOp;
@@ -21,6 +22,7 @@ class Processor implements PipelineRunner
     {
         return [
             'colorFilter' => ColorFilterOp::class,
+            'colorKey' => ColorKeyOp::class,
             'encode' => EncodeOp::class,
             'imgOpt' => ImgOptOp::class,
             'merge' => MergeOp::class,

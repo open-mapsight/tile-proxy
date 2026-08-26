@@ -244,6 +244,7 @@ Operations are chained sequentially as defined in the `ops` array. The first ope
 
 * `src`: Fetches the tile from the defined `urls`, or from a `wms` GetMap source. URL templates support `{z}`, `{x}`, `{y}`, `{prefix}`, `{bbox}` / `{bbox3857}` (Web Mercator meters), and `{bbox4326}` (lon,lat,lon,lat).
 * `colorFilter`: Applies color filters. Supported filters: `reducedSaturation`, `muted`, `culture`.
+* `colorKey`: Makes nodata fill colors transparent (`colors` as `#RRGGBB`, optional `fuzz`, optional `fromEdges`). Defaults to a flood from the tile edge and already-transparent pixels so isolated interior matches stay put. Always encodes PNG.
 * `encode`: Re-encodes the current tile to another image type (`mimeType`, optional `quality` for JPEG/WebP).
 * `imgOpt`: Optimizes the image using image optimizers.
 * `merge`: Merges the current tile with another set of operations.
@@ -309,6 +310,19 @@ JPEG is the right WMS `FORMAT` for aerial photos (smaller than PNG, widely suppo
     }
 ]
 ```
+
+To punch a solid nodata fill out of an aerial before overlaying it, add `colorKey`. `fuzz` is a per-channel tolerance. Keep `fromEdges` at its default (`true`) so interior roofs or shadows that happen to match the fill stay put:
+
+```jsonc
+{
+    "op": "colorKey",
+    "colors": ["#000000"],
+    "fuzz": 8,
+    "cacheServerName": "luftbild-keyed"
+}
+```
+
+Set `fromEdges` to `false` only when every matching pixel should become transparent, including interior matches.
 
 Leaflet, OpenLayers, and MapLibre can consume the proxied XYZ URL like any other raster tileset.
 
