@@ -7,7 +7,7 @@
         "tiles",
         "osm"
     ],
-    "homepage": "https://github.com/open-mapsight/mapsight-tile-proxy",
+    "homepage": "https://github.com/open-mapsight/tile-proxy",
     "license": "MIT",
     "authors": [
         {
@@ -17,8 +17,8 @@
         }
     ],
     "support": {
-        "issues": "https://github.com/open-mapsight/mapsight-tile-proxy/issues",
-        "source": "https://github.com/open-mapsight/mapsight-tile-proxy"
+        "issues": "https://github.com/open-mapsight/tile-proxy/issues",
+        "source": "https://github.com/open-mapsight/tile-proxy"
     },
     "require": {
         "php": "^8.2.0",

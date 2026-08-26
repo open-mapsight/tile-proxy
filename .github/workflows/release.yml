@@ -26,4 +26,4 @@ jobs:
         env:
           PACKAGIST_USER: ${{ secrets.PACKAGIST_USER }}
           PACKAGIST_TOKEN: ${{ secrets.PACKAGIST_TOKEN }}
-        run: curl -XPOST -H'Content-Type:application/json' "https://packagist.org/api/update-package?username=$PACKAGIST_USER&apiToken=$PACKAGIST_TOKEN" -d "{\"repository\":\"https://github.com/open-mapsight/mapsight-tile-proxy\"}"
+        run: curl -XPOST -H'Content-Type:application/json' "https://packagist.org/api/update-package?username=$PACKAGIST_USER&apiToken=$PACKAGIST_TOKEN" -d "{\"repository\":\"https://github.com/open-mapsight/tile-proxy\"}"
