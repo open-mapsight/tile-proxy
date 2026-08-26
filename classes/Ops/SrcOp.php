@@ -5,6 +5,7 @@ namespace OpenMapsight\TileProxy\Ops;
 
 use OpenMapsight\TileProxy\Result;
 use OpenMapsight\TileProxy\UpstreamFetcher;
+use OpenMapsight\TileProxy\WmsUrl;
 use RuntimeException;
 
 class SrcOp implements OpHandler
@@ -72,21 +73,25 @@ class SrcOp implements OpHandler
         return $next($res);
     }
 
-    private function getSrcUrl(array $cfg, Result $res): string
+    protected function getSrcUrl(array $cfg, Result $res): string
     {
+        $reqArgs = $res->getReqArgs();
+
+        if (!empty($cfg['wms']) && is_array($cfg['wms'])) {
+            $wms = $cfg['wms'];
+            if (!isset($wms['format']) && isset($cfg['mimeType']) && is_string($cfg['mimeType'])) {
+                $wms['format'] = $cfg['mimeType'];
+            }
+
+            return WmsUrl::fromConfig($wms, $reqArgs);
+        }
+
         if (empty($cfg['urls'])) {
             throw new RuntimeException('No urls configured');
         }
 
         $url = $cfg['urls'][array_rand($cfg['urls'])];
 
-        $reqArgs = $res->getReqArgs();
-        if ($reqArgs['prefix'] !== null) {
-            $url = str_replace('{prefix}', $reqArgs['prefix'], $url);
-        }
-
-        $url = str_replace('{z}', (string)$reqArgs['z'], $url);
-        $url = str_replace('{x}', (string)$reqArgs['x'], $url);
-        return str_replace('{y}', (string)$reqArgs['y'], $url);
+        return WmsUrl::expandPlaceholders($url, $reqArgs);
     }
 }

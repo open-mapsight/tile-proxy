@@ -72,7 +72,7 @@ class Utils
         return $img;
     }
 
-    public static function imageToBytes(string $mimeType, $img): string
+    public static function imageToBytes(string $mimeType, $img, ?int $quality = null): string
     {
         ob_start();
         try {
@@ -87,16 +87,23 @@ class Utils
                     break;
 
                 case 'image/jpeg':
-                    imageJpeg($img);
+                    if ($quality === null) {
+                        imageJpeg($img);
+                    } else {
+                        imageJpeg($img, null, $quality);
+                    }
                     break;
-
 
                 case 'image/png':
                     imagePng($img);
                     break;
 
                 case 'image/webp':
-                    imageWebP($img);
+                    if ($quality === null) {
+                        imageWebP($img);
+                    } else {
+                        imageWebP($img, null, $quality);
+                    }
                     break;
 
                 default:
