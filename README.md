@@ -242,13 +242,77 @@ Operations are chained sequentially as defined in the `ops` array. The first ope
 
 ### Available Operations
 
-* `src`: Fetches the tile from the defined `urls`. Supports `{z}`, `{x}`, `{y}`, and `{prefix}` placeholders.
+* `src`: Fetches the tile from the defined `urls`, or from a `wms` GetMap source. URL templates support `{z}`, `{x}`, `{y}`, `{prefix}`, `{bbox}` / `{bbox3857}` (Web Mercator meters), and `{bbox4326}` (lon,lat,lon,lat).
 * `colorFilter`: Applies color filters. Supported filters: `reducedSaturation`, `muted`, `culture`.
+* `encode`: Re-encodes the current tile to another image type (`mimeType`, optional `quality` for JPEG/WebP).
 * `imgOpt`: Optimizes the image using image optimizers.
 * `merge`: Merges the current tile with another set of operations.
 
 Any operation may include an optional `prefixes` array. When set, the operation runs only when the resolved tile
 prefix (from `prefixArgName` / `defaultPrefix`) is listed. This applies to sub-pipelines inside `merge` as well.
+
+### WMS as public XYZ tiles
+
+The public request stays a normal OSM-style XYZ tile (`?z=&x=&y=` or a `/tiles/{z}/{x}/{y}.jpg` rewrite). The `src` operation turns that tile into a WMS `GetMap` bbox and fetches one 256×256 image.
+
+Use a `wms` block for the common GeoServer case. The default CRS is `EPSG:3857`, which matches slippy-map tiles:
+
+```jsonc
+"ops": [
+    {
+        "cacheServerName": "luftbild-2024",
+        "wms": {
+            "url": "https://geoportal.example.de/geoserver/luftbilder/wms",
+            "layers": "Luftbild_2024",
+            "version": "1.1.1",
+            "format": "image/jpeg",
+            "srs": "EPSG:3857",
+            "transparent": false
+        },
+        "mimeType": "image/jpeg",
+        "cacheBrowserTtl": 86400,
+        "cacheServerTtl": 604800
+    }
+]
+```
+
+`format` defaults to the `src` `mimeType` when omitted. Supported `srs` values are `EPSG:3857`, `EPSG:4326`, and `CRS:84`. WMS 1.3.0 uses `CRS` and the EPSG:4326 lat/lon axis order.
+
+Or keep a full URL template when you need extra query parameters:
+
+```jsonc
+"urls": [
+    "https://geoportal.example.de/geoserver/luftbilder/wms?REQUEST=GetMap&SERVICE=WMS&VERSION=1.1.1&FORMAT=image/jpeg&STYLES=&TRANSPARENT=false&LAYERS=Luftbild_2024&WIDTH=256&HEIGHT=256&SRS=EPSG:3857&BBOX={bbox3857}"
+]
+```
+
+JPEG is the right WMS `FORMAT` for aerial photos (smaller than PNG, widely supported by GeoServer). WebP is rarely offered by WMS. Fetch JPEG, then `encode` if you want to serve WebP tiles to the browser:
+
+```jsonc
+"ops": [
+    {
+        "cacheServerName": "luftbild-2024",
+        "wms": {
+            "url": "https://geoportal.example.de/geoserver/luftbilder/wms",
+            "layers": "Luftbild_2024",
+            "format": "image/jpeg"
+        },
+        "mimeType": "image/jpeg",
+        "cacheBrowserTtl": 86400,
+        "cacheServerTtl": 604800
+    },
+    {
+        "op": "encode",
+        "mimeType": "image/webp",
+        "quality": 80,
+        "cacheServerName": "luftbild-webp"
+    }
+]
+```
+
+Leaflet, OpenLayers, and MapLibre can consume the proxied XYZ URL like any other raster tileset.
+
+If the WMS requires Basic auth, set `upstreamHttp.headers.Authorization` in the PHP bootstrap (not in committed JSONC). Some municipal WMS licenses also forbid local storage — disable or shorten `cacheServerTtl` when that applies.
 
 ## Mapbox Style Vector Proxy
 
