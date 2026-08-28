@@ -136,6 +136,103 @@ class ColorKeyOpTest extends TestCase
         $this->assertRgb($img, 0, 0, 9, 0, 0);
     }
 
+    public function testSoftKeyExactMatchIsFullyTransparent(): void
+    {
+        $img = $this->solidImage(1, 1, 255, 248, 189);
+
+        ColorKeyOp::cutImage($img, [[255, 248, 189]], 8, false, ['soft' => true]);
+
+        $this->assertTransparent($img, 0, 0);
+    }
+
+    public function testSoftKeyHalfwayFuzzIsPartialAlpha(): void
+    {
+        $img = $this->solidImage(1, 1, 4, 0, 0);
+
+        ColorKeyOp::cutImage($img, [[0, 0, 0]], 8, false, ['soft' => true]);
+
+        $this->assertSame(64, $this->pixel($img, 0, 0)[3]);
+        $this->assertSame([4, 0, 0], array_slice($this->pixel($img, 0, 0), 0, 3));
+    }
+
+    public function testSoftKeyOutsideFuzzStaysOpaque(): void
+    {
+        $img = $this->solidImage(1, 1, 9, 0, 0);
+
+        ColorKeyOp::cutImage($img, [[0, 0, 0]], 8, false, ['soft' => true]);
+
+        $this->assertRgb($img, 0, 0, 9, 0, 0);
+    }
+
+    public function testFeatherBlursHardKnockoutIntoNeighbors(): void
+    {
+        $img = $this->solidImage(3, 3, 255, 255, 255);
+        imagesetpixel($img, 1, 1, imagecolorallocate($img, 0, 0, 0));
+
+        ColorKeyOp::cutImage($img, [[0, 0, 0]], 0, false, ['feather' => 1]);
+
+        $center = $this->pixel($img, 1, 1)[3];
+        $edge = $this->pixel($img, 1, 0)[3];
+        $corner = $this->pixel($img, 0, 0)[3];
+        $this->assertGreaterThan(0, $center);
+        $this->assertGreaterThan(0, $edge);
+        $this->assertGreaterThan($edge, $center);
+        $this->assertGreaterThan($corner, $edge);
+    }
+
+    public function testProtectDarkerThanRestoresPartialDarkPixels(): void
+    {
+        $img = $this->solidImage(3, 3, 255, 248, 189);
+        imagesetpixel($img, 1, 1, imagecolorallocate($img, 20, 20, 20));
+
+        ColorKeyOp::cutImage(
+            $img,
+            [[255, 248, 189]],
+            0,
+            false,
+            ['feather' => 1, 'protectDarkerThan' => 80]
+        );
+
+        $this->assertRgb($img, 1, 1, 20, 20, 20);
+        $this->assertGreaterThan(0, $this->pixel($img, 0, 0)[3]);
+    }
+
+    public function testProtectDarkerThanDoesNotRestoreFullyTransparentFills(): void
+    {
+        $img = $this->solidImage(1, 1, 20, 20, 20);
+
+        ColorKeyOp::cutImage($img, [[20, 20, 20]], 0, false, ['protectDarkerThan' => 80]);
+
+        $this->assertTransparent($img, 0, 0);
+    }
+
+    public function testParseOptionsRejectsNegativeFeather(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('colorKey feather must be >= 0');
+        ColorKeyOp::parseOptions(['feather' => -1]);
+    }
+
+    public function testInvokePassesSoftAndFeatherOptions(): void
+    {
+        $img = $this->solidImage(1, 1, 4, 0, 0);
+        $res = $this->resultWithImage($img);
+
+        $out = (new ColorKeyOp())(
+            static fn (Result $result): Result => $result,
+            [
+                'colors' => ['#000000'],
+                'fuzz' => 8,
+                'fromEdges' => false,
+                'soft' => true,
+            ],
+            $res
+        );
+
+        $processed = Utils::bytesToImage($out->getData());
+        $this->assertSame(64, $this->pixel($processed, 0, 0)[3]);
+    }
+
     public function testInvokeEncodesPngAndClearsEdgeKeyColor(): void
     {
         $img = $this->solidImage(3, 3, 255, 255, 255);
