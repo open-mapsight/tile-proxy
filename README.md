@@ -244,7 +244,7 @@ Operations are chained sequentially as defined in the `ops` array. The first ope
 
 * `src`: Fetches the tile from the defined `urls`, or from a `wms` GetMap source. URL templates support `{z}`, `{x}`, `{y}`, `{prefix}`, `{bbox}` / `{bbox3857}` (Web Mercator meters), and `{bbox4326}` (lon,lat,lon,lat).
 * `colorFilter`: Applies color filters. Supported filters: `reducedSaturation`, `muted`, `culture`.
-* `colorKey`: Makes nodata fill colors transparent (`colors` as `#RRGGBB`, optional `fuzz`, optional `fromEdges`). Defaults to a flood from the tile edge and already-transparent pixels so isolated interior matches stay put. Always encodes PNG.
+* `colorKey`: Makes nodata fill colors transparent (`colors` as `#RRGGBB`, optional `fuzz`, optional `fromEdges`). Defaults to a flood from the tile edge and already-transparent pixels so isolated interior matches stay put. Always encodes PNG. Optional `soft` fades alpha by distance to the key color instead of a hard cut. Optional `feather` (integer pixel passes) blurs alpha afterward. Optional `protectDarkerThan` (0–255 luminance) restores partial-alpha pixels darker than that value so labels stay opaque after a street-fill punch.
 * `encode`: Re-encodes the current tile to another image type (`mimeType`, optional `quality` for JPEG/WebP).
 * `imgOpt`: Optimizes the image using image optimizers.
 * `merge`: Merges the current tile with another set of operations.
@@ -323,6 +323,21 @@ To punch a solid nodata fill out of an aerial before overlaying it, add `colorKe
 ```
 
 Set `fromEdges` to `false` only when every matching pixel should become transparent, including interior matches.
+
+To punch cartographic fills (street interiors) and keep labels, turn off the edge flood, fade the cut, then protect dark ink:
+
+```jsonc
+{
+    "op": "colorKey",
+    "colors": ["#ffffff", "#fff8bd", "#d0d0d0"],
+    "fuzz": 8,
+    "fromEdges": false,
+    "soft": true,
+    "feather": 2,
+    "protectDarkerThan": 80,
+    "cacheServerName": "stadtplan-ink"
+}
+```
 
 Leaflet, OpenLayers, and MapLibre can consume the proxied XYZ URL like any other raster tileset.
 
