@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace OpenMapsight\TileProxy\Tests;
 
+use DirectoryIterator;
 use InvalidArgumentException;
 use OpenMapsight\TileProxy\Base;
 use OpenMapsight\TileProxy\CachePruner;
@@ -14,6 +15,7 @@ use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use ReflectionMethod;
 use RuntimeException;
+use UnexpectedValueException;
 
 class CachePrunerTest extends TestCase
 {
@@ -304,6 +306,50 @@ class CachePrunerTest extends TestCase
             'directory sweep' => [false],
             'cache root' => [true],
         ];
+    }
+
+    #[DataProvider('directoryIteratorClasses')]
+    public function testRetriesOpeningADirectoryRecreatedAfterTheFailedOpen(string $iteratorClass): void
+    {
+        $directory = $this->tempDir . '/recreated';
+        $recreated = false;
+        $open = static function () use ($directory, $iteratorClass, &$recreated): DirectoryIterator {
+            try {
+                return new $iteratorClass($directory);
+            } catch (UnexpectedValueException $error) {
+                // A request restores the directory between its failed open and the pruner's check.
+                mkdir($directory);
+                $recreated = true;
+                throw $error;
+            }
+        };
+
+        $openDirectory = new ReflectionMethod(CachePruner::class, 'openDirectory');
+        $iterator = $openDirectory->invoke(null, $directory, $open);
+
+        $this->assertTrue($recreated);
+        $this->assertInstanceOf($iteratorClass, $iterator);
+        $this->assertDirectoryExists($directory);
+    }
+
+    public static function directoryIteratorClasses(): array
+    {
+        return [
+            'directory sweep' => [DirectoryIterator::class],
+            'cache root' => [RecursiveDirectoryIterator::class],
+        ];
+    }
+
+    public function testPersistentDirectoryOpenFailuresAreReported(): void
+    {
+        $open = static function (): DirectoryIterator {
+            throw new UnexpectedValueException('Persistent directory open failure');
+        };
+        $openDirectory = new ReflectionMethod(CachePruner::class, 'openDirectory');
+
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('Persistent directory open failure');
+        $openDirectory->invoke(null, $this->tempDir, $open);
     }
 
     public function testNonPositiveRetentionIsRejected(): void

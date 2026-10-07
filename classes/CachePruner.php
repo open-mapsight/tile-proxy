@@ -31,14 +31,14 @@ final class CachePruner
         $deleted = 0;
         // Mapbox asset writers do not share raster tile locks, even in the same cache root.
         $mapboxCachePath = $cacheServerPath . 'mapbox-style-proxy';
-        try {
-            $directories = new RecursiveDirectoryIterator($cacheServerPath, RecursiveDirectoryIterator::SKIP_DOTS);
-        } catch (UnexpectedValueException $error) {
-            clearstatcache(true, $cacheServerPath);
-            if (!is_dir($cacheServerPath)) {
-                return 0;
-            }
-            throw $error;
+        $directories = self::openDirectory(
+            $cacheServerPath,
+            static fn (): RecursiveDirectoryIterator => new RecursiveDirectoryIterator(
+                $cacheServerPath, RecursiveDirectoryIterator::SKIP_DOTS
+            )
+        );
+        if ($directories === null) {
+            return 0;
         }
 
         $files = new RecursiveIteratorIterator(
@@ -68,15 +68,9 @@ final class CachePruner
 
     private static function pruneDirectory(string $path, int $cutoff): int
     {
-        try {
-            $files = new DirectoryIterator($path);
-        } catch (UnexpectedValueException $error) {
-            // Another pruner may have removed this empty directory during traversal.
-            clearstatcache(true, $path);
-            if (!is_dir($path)) {
-                return 0;
-            }
-            throw $error;
+        $files = self::openDirectory($path, static fn (): DirectoryIterator => new DirectoryIterator($path));
+        if ($files === null) {
+            return 0;
         }
 
         $groups = [];
@@ -100,6 +94,29 @@ final class CachePruner
         }
 
         return $deleted;
+    }
+
+    /**
+     * @template T of DirectoryIterator
+     * @param callable(): T $open
+     * @return T|null
+     */
+    private static function openDirectory(string $path, callable $open): ?DirectoryIterator
+    {
+        for ($attempt = 0; ; ++$attempt) {
+            try {
+                return $open();
+            } catch (UnexpectedValueException $error) {
+                clearstatcache(true, $path);
+                if (!is_dir($path)) {
+                    return null;
+                }
+                // A request may have recreated the directory after the failed open. Retry once.
+                if ($attempt > 0) {
+                    throw $error;
+                }
+            }
+        }
     }
 
     /** @param list<string> $tiles */
