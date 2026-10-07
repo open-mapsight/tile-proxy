@@ -40,9 +40,9 @@ final class FileLock
                     return null;
                 }
 
-                // An empty cache directory may have been pruned after mkdirp().
+                // The parent may have been removed before fopen() and recreated before this check.
                 clearstatcache(true, dirname($path));
-                if (is_dir(dirname($path)) || hrtime(true) / 1e9 >= $deadline) {
+                if (hrtime(true) / 1e9 >= $deadline) {
                     throw new RuntimeException('Could not open lock file "' . $path . '"');
                 }
             } else {

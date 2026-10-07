@@ -97,18 +97,30 @@ class CacheLockTest extends TestCase
         $lock->release();
     }
 
-    public function testRetriesWhenDirectoryIsPrunedDuringCreation(): void
+    #[DataProvider('directoryRecreation')]
+    public function testRetriesWhenDirectoryIsPrunedDuringCreation(bool $recreateAfterFailedOpen): void
     {
         $path = $this->metadataPath();
         $directory = dirname($path);
         mkdir($directory, 0777, true);
         $removed = false;
-        set_error_handler(static function (int $severity, string $message) use ($directory, &$removed): bool {
+        $recreated = false;
+        set_error_handler(static function (int $severity, string $message) use (
+            $directory, $recreateAfterFailedOpen, &$removed, &$recreated
+        ): bool {
             if (!$removed && str_contains($message, 'mkdir(): File exists')) {
                 // Remove the empty directory between mkdir() failing and mkdirp() checking is_dir().
                 rmdir($directory);
                 clearstatcache(true, $directory);
                 $removed = true;
+                return true;
+            }
+
+            if ($recreateAfterFailedOpen && $removed && !$recreated && str_contains($message, 'fopen(')) {
+                // Another request recreates the parent after the open fails, before its error is checked.
+                mkdir($directory, 0777, true);
+                clearstatcache(true, $directory);
+                $recreated = true;
                 return true;
             }
 
@@ -122,9 +134,18 @@ class CacheLockTest extends TestCase
         }
 
         $this->assertTrue($removed);
+        $this->assertSame($recreateAfterFailedOpen, $recreated);
         $this->assertNotNull($lock);
         $lock->release();
         $this->assertFileExists($path);
+    }
+
+    public static function directoryRecreation(): array
+    {
+        return [
+            'recreated on retry' => [false],
+            'recreated after failed open' => [true],
+        ];
     }
 
     public function testDirectoryCreationFailureIsReportedWithinTheLockBudget(): void
