@@ -45,23 +45,13 @@ class Base
         $cachePath = static::getCachePath($cfg, $reqArgs);
 
         $metadataPath = $cachePath . '-.metadata';
-        Utils::mkdirp(dirname($cachePath));
-        $lockH = fopen($metadataPath, 'cb');
-        for ($lockTry = 1; ; ++$lockTry) {
-            if (flock($lockH, LOCK_EX | LOCK_NB) === true) {
-                break;
-            }
-
-            if (10 <= $lockTry) {
-                if (isset($cfg['yoloOnLockTimeout']) && $cfg['yoloOnLockTimeout'] === true) {
-                    @error_log('Yoloed lock for "' . $metadataPath . '"' . "\n");
-                    break;
-                }
-
+        $lock = FileLock::acquire($metadataPath, (float)($cfg['cacheLockTimeout'] ?? 2.85));
+        if ($lock === null) {
+            if (isset($cfg['yoloOnLockTimeout']) && $cfg['yoloOnLockTimeout'] === true) {
+                @error_log('Yoloed lock for "' . $metadataPath . '"' . "\n");
+            } else {
                 throw new RuntimeException('Can not lock "' . $metadataPath . '"');
             }
-
-            usleep($lockTry * $lockTry * 10 * 1000);
         }
 
         try {
@@ -83,10 +73,13 @@ class Base
 
             $res->checkpointCache();
             Metadata::save($meta);
+            if (!touch($metadataPath)) {
+                throw new RuntimeException('Could not update cache access time "' . $metadataPath . '"');
+            }
 
             return static::buildTileResponse($res);
         } finally {
-            flock($lockH, LOCK_UN);
+            $lock?->release();
         }
     }
 

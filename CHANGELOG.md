@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `cacheLockTimeout` to configure the raster cache lock wait independently of upstream HTTP timeouts.
+- `CachePruner::prune()` for scheduled raster tile retention, including obsolete namespaces and unused metadata.
+
+### Fixed
+
+- Close cache lock handles on successful and failed requests, and retry when a cleaner replaced the metadata inode.
+
 ## [2.4.1] - 2026-08-28
 
 ### Fixed
