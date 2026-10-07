@@ -4,11 +4,15 @@ declare(strict_types=1);
 namespace OpenMapsight\TileProxy\Tests;
 
 use InvalidArgumentException;
+use OpenMapsight\TileProxy\Base;
 use OpenMapsight\TileProxy\CachePruner;
 use OpenMapsight\TileProxy\FileLock;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
+use ReflectionMethod;
+use RuntimeException;
 
 class CachePrunerTest extends TestCase
 {
@@ -60,6 +64,65 @@ class CachePrunerTest extends TestCase
 
         $this->assertSame(2, CachePruner::prune($this->tempDir, 60));
         $this->assertFileExists($metadata);
+    }
+
+    #[DataProvider('staleScans')]
+    public function testKeepsMetadataForCheckpointWrittenAfterScanByAFailedRequest(bool $scanHadTile): void
+    {
+        $metadata = $this->write('cache/1/0/0-.metadata', 120);
+        $scannedTiles = $scanHadTile ? [$this->write('cache/1/0/0-old-source-0', 120)] : [];
+        $source = $this->write('source');
+        $metadataMtime = filemtime($metadata);
+        $savedGet = $_GET;
+        $_GET = ['z' => '1', 'x' => '0', 'y' => '0'];
+
+        try {
+            Base::handleTileRequest([
+                'cacheServerPath' => $this->tempDir . '/cache',
+                'cacheLockTimeout' => 0,
+                'ops' => [
+                    [
+                        'cacheServerName' => 'new-source',
+                        'urls' => ['file://' . $source],
+                        'mimeType' => 'image/png',
+                        'cacheBrowserTtl' => 60,
+                        'cacheServerTtl' => 3600,
+                    ],
+                    // Merge checkpoints the source before this invalid subpipeline fails.
+                    ['op' => 'merge', 'ops' => [[]]],
+                ],
+            ]);
+            $this->fail('The merge subpipeline must fail after checkpointing the source');
+        } catch (RuntimeException $error) {
+            $this->assertStringContainsString('Missing `cacheServerName`', $error->getMessage());
+        } finally {
+            $_GET = $savedGet;
+        }
+
+        $checkpoint = $this->tempDir . '/cache/1/0/0-new-source-0';
+        $this->assertFileExists($checkpoint);
+        clearstatcache(true, $metadata);
+        $this->assertSame($metadataMtime, filemtime($metadata));
+
+        // Resume pruning with the pre-request scan to reproduce the interleaving without timing races.
+        $pruneTile = new ReflectionMethod(CachePruner::class, 'pruneTile');
+        $this->assertSame($scanHadTile ? 1 : 0, $pruneTile->invoke(null, $metadata, $scannedTiles, time() - 60));
+        $this->assertFileExists($checkpoint);
+        $this->assertFileExists($metadata);
+
+        // Keeping metadata lets a later retention run remove the checkpoint once it ages out.
+        touch($checkpoint, time() - 120);
+        $this->assertSame(2, CachePruner::prune($this->tempDir, 60));
+        $this->assertFileDoesNotExist($checkpoint);
+        $this->assertFileDoesNotExist($metadata);
+    }
+
+    public static function staleScans(): array
+    {
+        return [
+            'metadata only' => [false],
+            'obsolete namespace' => [true],
+        ];
     }
 
     public function testIgnoresSymlinksUnrelatedFilesAndOtherTileCoordinates(): void

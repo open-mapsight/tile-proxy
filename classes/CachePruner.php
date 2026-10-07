@@ -103,9 +103,9 @@ final class CachePruner
                 }
             }
 
-            // Base touches metadata under this lock on every completed request, including
-            // when a new cache namespace was created after the directory scan.
-            if (!$hasTiles && self::isExpired($metadataPath, $cutoff)) {
+            // A failed request can checkpoint a new namespace after the scan without touching
+            // metadata. Recheck the directory under the lock before removing its lock file.
+            if (!$hasTiles && self::isExpired($metadataPath, $cutoff) && !self::hasTiles($metadataPath)) {
                 self::delete($metadataPath);
                 ++$deleted;
             }
@@ -114,6 +114,18 @@ final class CachePruner
         } finally {
             $lock->release();
         }
+    }
+
+    private static function hasTiles(string $metadataPath): bool
+    {
+        $tilePattern = '/^' . preg_quote(basename($metadataPath, '-.metadata'), '/') . '-.+-\d+$/D';
+        foreach (new DirectoryIterator(dirname($metadataPath)) as $file) {
+            if (!$file->isLink() && $file->isFile() && preg_match($tilePattern, $file->getFilename()) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function isExpired(string $path, int $cutoff): bool
