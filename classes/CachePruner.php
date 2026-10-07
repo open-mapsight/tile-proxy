@@ -62,6 +62,7 @@ final class CachePruner
             $files = new DirectoryIterator($path);
         } catch (UnexpectedValueException $error) {
             // Another pruner may have removed this empty directory during traversal.
+            clearstatcache(true, $path);
             if (!is_dir($path)) {
                 return 0;
             }

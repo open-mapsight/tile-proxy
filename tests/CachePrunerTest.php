@@ -237,6 +237,63 @@ class CachePrunerTest extends TestCase
         $this->assertDirectoryDoesNotExist($this->tempDir . '/missing');
     }
 
+    public function testDirectoryRemovedByAnotherProcessIsANoOpDespiteCachedStat(): void
+    {
+        if (!defined('SIGSTOP') || !defined('SIGCONT')) {
+            $this->markTestSkipped('Process signals are required to preserve the parent stat cache');
+        }
+
+        $directory = $this->tempDir . '/removed';
+        mkdir($directory);
+        $pruneDirectory = new ReflectionMethod(CachePruner::class, 'pruneDirectory');
+
+        // A subprocess removes the directory without clearing this process's positive stat cache.
+        $process = proc_open(
+            [PHP_BINARY, '-r', 'fgets(STDIN); exit(rmdir($argv[1]) ? 0 : 1);', $directory],
+            [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
+            $pipes
+        );
+        $this->assertIsResource($process);
+
+        try {
+            proc_terminate($process, SIGSTOP);
+            $deadline = hrtime(true) + 2e9;
+            do {
+                $status = proc_get_status($process);
+                if ($status['stopped'] || !$status['running'] || hrtime(true) >= $deadline) {
+                    break;
+                }
+                usleep(1000);
+            } while (true);
+            $this->assertTrue($status['stopped']);
+            fwrite($pipes[0], "GO\n");
+            $this->assertTrue(is_dir($directory));
+
+            // Signals and process-status polling avoid pipe I/O, which clears PHP's stat cache.
+            proc_terminate($process, SIGCONT);
+            $deadline = hrtime(true) + 2e9;
+            do {
+                $status = proc_get_status($process);
+                if (!$status['running'] || hrtime(true) >= $deadline) {
+                    break;
+                }
+                usleep(1000);
+            } while (true);
+            $this->assertTrue(is_dir($directory), 'The parent must retain the stale positive directory stat');
+
+            $this->assertSame(0, $pruneDirectory->invoke(null, $directory, time() - 60));
+            $this->assertFalse($status['running']);
+            $this->assertSame(0, $status['exitcode']);
+            $this->assertDirectoryDoesNotExist($directory);
+        } finally {
+            proc_terminate($process, SIGCONT);
+            fclose($pipes[0]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            proc_close($process);
+        }
+    }
+
     public function testNonPositiveRetentionIsRejected(): void
     {
         $this->expectException(InvalidArgumentException::class);
