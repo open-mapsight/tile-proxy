@@ -237,7 +237,8 @@ class CachePrunerTest extends TestCase
         $this->assertDirectoryDoesNotExist($this->tempDir . '/missing');
     }
 
-    public function testDirectoryRemovedByAnotherProcessIsANoOpDespiteCachedStat(): void
+    #[DataProvider('pruneEntryPoints')]
+    public function testDirectoryRemovedByAnotherProcessIsANoOpDespiteCachedStat(bool $pruneRoot): void
     {
         if (!defined('SIGSTOP') || !defined('SIGCONT')) {
             $this->markTestSkipped('Process signals are required to preserve the parent stat cache');
@@ -281,7 +282,10 @@ class CachePrunerTest extends TestCase
             } while (true);
             $this->assertTrue(is_dir($directory), 'The parent must retain the stale positive directory stat');
 
-            $this->assertSame(0, $pruneDirectory->invoke(null, $directory, time() - 60));
+            $deleted = $pruneRoot
+                ? CachePruner::prune($directory, 60)
+                : $pruneDirectory->invoke(null, $directory, time() - 60);
+            $this->assertSame(0, $deleted);
             $this->assertFalse($status['running']);
             $this->assertSame(0, $status['exitcode']);
             $this->assertDirectoryDoesNotExist($directory);
@@ -292,6 +296,14 @@ class CachePrunerTest extends TestCase
             fclose($pipes[2]);
             proc_close($process);
         }
+    }
+
+    public static function pruneEntryPoints(): array
+    {
+        return [
+            'directory sweep' => [false],
+            'cache root' => [true],
+        ];
     }
 
     public function testNonPositiveRetentionIsRejected(): void
