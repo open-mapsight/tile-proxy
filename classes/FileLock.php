@@ -23,7 +23,15 @@ final class FileLock
         $deadline = hrtime(true) / 1e9 + $timeout;
         do {
             if ($create) {
-                Utils::mkdirp(dirname($path));
+                try {
+                    Utils::mkdirp(dirname($path));
+                } catch (RuntimeException $error) {
+                    // A pruner can remove the directory between mkdirp()'s mkdir() and is_dir().
+                    // Let the open attempt below handle recovery within the same lock budget.
+                    if (hrtime(true) / 1e9 >= $deadline) {
+                        throw $error;
+                    }
+                }
             }
 
             $handle = @fopen($path, $create ? 'c+b' : 'r+b');

@@ -97,6 +97,54 @@ class CacheLockTest extends TestCase
         $lock->release();
     }
 
+    public function testRetriesWhenDirectoryIsPrunedDuringCreation(): void
+    {
+        $path = $this->metadataPath();
+        $directory = dirname($path);
+        mkdir($directory, 0777, true);
+        $removed = false;
+        set_error_handler(static function (int $severity, string $message) use ($directory, &$removed): bool {
+            if (!$removed && str_contains($message, 'mkdir(): File exists')) {
+                // Remove the empty directory between mkdir() failing and mkdirp() checking is_dir().
+                rmdir($directory);
+                clearstatcache(true, $directory);
+                $removed = true;
+                return true;
+            }
+
+            return false;
+        });
+
+        try {
+            $lock = FileLock::acquire($path, 0.2);
+        } finally {
+            restore_error_handler();
+        }
+
+        $this->assertTrue($removed);
+        $this->assertNotNull($lock);
+        $lock->release();
+        $this->assertFileExists($path);
+    }
+
+    public function testDirectoryCreationFailureIsReportedWithinTheLockBudget(): void
+    {
+        $parentFile = $this->tempDir . '/not-a-directory';
+        file_put_contents($parentFile, 'blocked');
+        $timeout = 0.03;
+        $start = hrtime(true);
+
+        try {
+            FileLock::acquire($parentFile . '/metadata', $timeout);
+            $this->fail('A file cannot be used as the metadata directory');
+        } catch (RuntimeException $error) {
+            $this->assertStringContainsString($parentFile, $error->getMessage());
+            $elapsed = (hrtime(true) - $start) / 1e9;
+            $this->assertGreaterThanOrEqual($timeout, $elapsed);
+            $this->assertLessThan(1, $elapsed);
+        }
+    }
+
     #[DataProvider('invalidTimeouts')]
     public function testInvalidTimeoutIsRejected(float $timeout): void
     {

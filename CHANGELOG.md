@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Close cache lock handles on successful and failed requests, and retry when a cleaner replaced the metadata inode.
+- Close cache lock handles on successful and failed requests, and retry when a cleaner replaces the metadata inode or removes an empty cache directory.
 
 ## [2.4.1] - 2026-08-28
 

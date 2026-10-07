@@ -120,7 +120,7 @@ final class CachePruner
     {
         $tilePattern = '/^' . preg_quote(basename($metadataPath, '-.metadata'), '/') . '-.+-\d+$/D';
         foreach (new DirectoryIterator(dirname($metadataPath)) as $file) {
-            if (!$file->isLink() && $file->isFile() && preg_match($tilePattern, $file->getFilename()) === 1) {
+            if (preg_match($tilePattern, $file->getFilename()) === 1 && !$file->isLink() && $file->isFile()) {
                 return true;
             }
         }
