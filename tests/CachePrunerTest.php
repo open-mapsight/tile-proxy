@@ -126,7 +126,8 @@ class CachePrunerTest extends TestCase
         ];
     }
 
-    public function testSharedCachePruningPreservesAMapboxAssetWriteInProgress(): void
+    #[DataProvider('cacheRootSuffixes')]
+    public function testSharedCachePruningPreservesAMapboxAssetWriteInProgress(string $rootSuffix): void
     {
         $this->write('1/0/0-source-0', 120);
         $this->write('1/0/0-.metadata', 120);
@@ -135,7 +136,7 @@ class CachePrunerTest extends TestCase
         file_put_contents($upstreamStyle, $style);
         $mapboxDirectory = $this->tempDir . '/mapbox-style-proxy/example/style';
         mkdir($mapboxDirectory, 0777, true);
-        $cacheRoot = $this->tempDir;
+        $cacheRoot = $this->tempDir . $rootSuffix;
         $pruned = false;
         $deleted = null;
 
@@ -152,7 +153,7 @@ class CachePrunerTest extends TestCase
 
         try {
             $response = MapboxStyleProxy::handleRequest([
-                'cacheServerPath' => $this->tempDir,
+                'cacheServerPath' => $cacheRoot,
                 'styles' => ['example' => [
                     'upstreamStyleUrl' => 'file://' . $upstreamStyle,
                     'allowedSchemes' => ['file'],
@@ -170,7 +171,8 @@ class CachePrunerTest extends TestCase
         $this->assertSame($style, file_get_contents($mapboxDirectory . '/' . sha1('file://' . $upstreamStyle)));
     }
 
-    public function testIgnoresFilesAndEmptyDirectoriesInReservedMapboxCacheTree(): void
+    #[DataProvider('cacheRootSuffixes')]
+    public function testIgnoresFilesAndEmptyDirectoriesInReservedMapboxCacheTree(string $rootSuffix): void
     {
         $asset = $this->write('mapbox-style-proxy/example/style/abc', 120);
         $tile = $this->write('mapbox-style-proxy/example/tile/1-source-0', 120);
@@ -178,11 +180,21 @@ class CachePrunerTest extends TestCase
         $emptyDirectory = $this->tempDir . '/mapbox-style-proxy/example/glyph';
         mkdir($emptyDirectory);
 
-        $this->assertSame(0, CachePruner::prune($this->tempDir . '/', 60));
+        $this->assertSame(0, CachePruner::prune($this->tempDir . $rootSuffix, 60));
         foreach ([$asset, $tile, $metadata] as $path) {
             $this->assertFileExists($path);
         }
         $this->assertDirectoryExists($emptyDirectory);
+    }
+
+    public static function cacheRootSuffixes(): array
+    {
+        return [
+            'no trailing slash' => [''],
+            'one trailing slash' => ['/'],
+            'two trailing slashes' => ['//'],
+            'three trailing slashes' => ['///'],
+        ];
     }
 
     public function testIgnoresSymlinksUnrelatedFilesAndOtherTileCoordinates(): void

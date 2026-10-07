@@ -25,10 +25,12 @@ final class CachePruner
             return 0;
         }
 
+        // Use the same separators for iterator paths and the reserved-subtree comparison.
+        $cacheServerPath = rtrim($cacheServerPath, '/') . '/';
         $cutoff = time() - $maxAgeSeconds;
         $deleted = 0;
         // Mapbox asset writers do not share raster tile locks, even in the same cache root.
-        $mapboxCachePath = rtrim($cacheServerPath, '/') . '/mapbox-style-proxy';
+        $mapboxCachePath = $cacheServerPath . 'mapbox-style-proxy';
         $files = new RecursiveIteratorIterator(
             new RecursiveCallbackFilterIterator(
                 new RecursiveDirectoryIterator($cacheServerPath, RecursiveDirectoryIterator::SKIP_DOTS),
