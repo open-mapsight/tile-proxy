@@ -7,6 +7,7 @@ use InvalidArgumentException;
 use OpenMapsight\TileProxy\Base;
 use OpenMapsight\TileProxy\CachePruner;
 use OpenMapsight\TileProxy\FileLock;
+use OpenMapsight\TileProxy\MapboxStyleProxy;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use RecursiveDirectoryIterator;
@@ -123,6 +124,65 @@ class CachePrunerTest extends TestCase
             'metadata only' => [false],
             'obsolete namespace' => [true],
         ];
+    }
+
+    public function testSharedCachePruningPreservesAMapboxAssetWriteInProgress(): void
+    {
+        $this->write('1/0/0-source-0', 120);
+        $this->write('1/0/0-.metadata', 120);
+        $style = '{"version":8,"sources":{},"layers":[]}';
+        $upstreamStyle = $this->write('upstream-style.json');
+        file_put_contents($upstreamStyle, $style);
+        $mapboxDirectory = $this->tempDir . '/mapbox-style-proxy/example/style';
+        mkdir($mapboxDirectory, 0777, true);
+        $cacheRoot = $this->tempDir;
+        $pruned = false;
+        $deleted = null;
+
+        set_error_handler(static function (int $severity, string $message) use ($cacheRoot, &$pruned, &$deleted): bool {
+            if (!$pruned && str_contains($message, 'mkdir(): File exists')) {
+                // Pause the asset writer in mkdirp(), while its existing directory is still empty.
+                $pruned = true;
+                $deleted = CachePruner::prune($cacheRoot, 60);
+                return true;
+            }
+
+            return false;
+        });
+
+        try {
+            $response = MapboxStyleProxy::handleRequest([
+                'cacheServerPath' => $this->tempDir,
+                'styles' => ['example' => [
+                    'upstreamStyleUrl' => 'file://' . $upstreamStyle,
+                    'allowedSchemes' => ['file'],
+                    'allowedPathPrefixes' => [$this->tempDir . '/'],
+                ]],
+            ], '/styles/example.json');
+        } finally {
+            restore_error_handler();
+        }
+
+        $this->assertTrue($pruned);
+        $this->assertSame(2, $deleted);
+        $this->assertSame(8, json_decode($response->body, true)['version']);
+        $this->assertDirectoryExists($mapboxDirectory);
+        $this->assertSame($style, file_get_contents($mapboxDirectory . '/' . sha1('file://' . $upstreamStyle)));
+    }
+
+    public function testIgnoresFilesAndEmptyDirectoriesInReservedMapboxCacheTree(): void
+    {
+        $asset = $this->write('mapbox-style-proxy/example/style/abc', 120);
+        $tile = $this->write('mapbox-style-proxy/example/tile/1-source-0', 120);
+        $metadata = $this->write('mapbox-style-proxy/example/tile/1-.metadata', 120);
+        $emptyDirectory = $this->tempDir . '/mapbox-style-proxy/example/glyph';
+        mkdir($emptyDirectory);
+
+        $this->assertSame(0, CachePruner::prune($this->tempDir . '/', 60));
+        foreach ([$asset, $tile, $metadata] as $path) {
+            $this->assertFileExists($path);
+        }
+        $this->assertDirectoryExists($emptyDirectory);
     }
 
     public function testIgnoresSymlinksUnrelatedFilesAndOtherTileCoordinates(): void

@@ -154,7 +154,8 @@ $deleted = CachePruner::prune('/var/cache/mapsight-tile-proxy', 30 * 86400);
 
 Choose a retention period longer than your raster `cacheServerTtl` values and any upstream minimum caching
 requirements. Age is measured from tile writes, not filesystem atime; metadata tracks the last completed request.
-Retention limits the age of stored tiles, not total disk usage. Mapbox style assets are outside this raster cleanup.
+Retention limits the age of stored tiles, not total disk usage. The reserved `mapbox-style-proxy` subtree, including
+its empty directories, is excluded from raster cleanup.
 
 The pruner takes the same per-tile lock as `Base`, skips busy tiles without waiting, and rechecks timestamps under
 the lock. Waiting requests reopen metadata that was removed by the pruner before using the cache. Run cleanup

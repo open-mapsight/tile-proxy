@@ -5,9 +5,11 @@ namespace OpenMapsight\TileProxy;
 
 use DirectoryIterator;
 use InvalidArgumentException;
+use RecursiveCallbackFilterIterator;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use RuntimeException;
+use SplFileInfo;
 use UnexpectedValueException;
 
 final class CachePruner
@@ -25,8 +27,13 @@ final class CachePruner
 
         $cutoff = time() - $maxAgeSeconds;
         $deleted = 0;
+        // Mapbox asset writers do not share raster tile locks, even in the same cache root.
+        $mapboxCachePath = rtrim($cacheServerPath, '/') . '/mapbox-style-proxy';
         $files = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($cacheServerPath, RecursiveDirectoryIterator::SKIP_DOTS),
+            new RecursiveCallbackFilterIterator(
+                new RecursiveDirectoryIterator($cacheServerPath, RecursiveDirectoryIterator::SKIP_DOTS),
+                static fn (SplFileInfo $file): bool => $file->getPathname() !== $mapboxCachePath
+            ),
             RecursiveIteratorIterator::CHILD_FIRST,
             RecursiveIteratorIterator::CATCH_GET_CHILD
         );
