@@ -19,11 +19,12 @@ class CachePrunerTest extends TestCase
 {
     private string $tempDir;
 
-    public function testRemovesOldTilesMetadataAndEmptyDirectoriesIncludingPrefixes(): void
+    #[DataProvider('cacheNamespaces')]
+    public function testRemovesOldTilesMetadataAndEmptyDirectoriesIncludingPrefixes(string $namespace): void
     {
-        $this->write('dark/12/2048/1024-source-0', 120);
+        $this->write('dark/12/2048/1024-' . $namespace . '-0', 120);
         $this->write('dark/12/2048/1024-overlay-0', 120);
-        $this->write('dark/12/2048/1024-source-1', 120);
+        $this->write('dark/12/2048/1024-' . $namespace . '-1', 120);
         $this->write('dark/12/2048/1024-.metadata', 120);
 
         $this->assertSame(4, CachePruner::prune($this->tempDir, 60));
@@ -32,16 +33,25 @@ class CachePrunerTest extends TestCase
         $this->assertSame(0, CachePruner::prune($this->tempDir, 60));
     }
 
-    public function testRemovesObsoleteNamespacesButKeepsFreshTileAndItsMetadata(): void
+    #[DataProvider('cacheNamespaces')]
+    public function testRemovesObsoleteNamespacesButKeepsFreshTileAndItsMetadata(string $namespace): void
     {
         $old = $this->write('1/0/0-old-url-hash-0', 120);
-        $fresh = $this->write('1/0/0-current-url-hash-0');
+        $fresh = $this->write('1/0/0-' . $namespace . '-0');
         $metadata = $this->write('1/0/0-.metadata', 120);
 
         $this->assertSame(1, CachePruner::prune($this->tempDir, 60));
         $this->assertFileDoesNotExist($old);
         $this->assertFileExists($fresh);
         $this->assertFileExists($metadata);
+    }
+
+    public static function cacheNamespaces(): array
+    {
+        return [
+            'named namespace' => ['current-url-hash'],
+            'empty namespace' => [''],
+        ];
     }
 
     public function testSkipsTilesLockedByARequestThenPrunesAfterRelease(): void
@@ -68,7 +78,9 @@ class CachePrunerTest extends TestCase
     }
 
     #[DataProvider('staleScans')]
-    public function testKeepsMetadataForCheckpointWrittenAfterScanByAFailedRequest(bool $scanHadTile): void
+    public function testKeepsMetadataForCheckpointWrittenAfterScanByAFailedRequest(
+        bool $scanHadTile, string $checkpointNamespace
+    ): void
     {
         $metadata = $this->write('cache/1/0/0-.metadata', 120);
         $scannedTiles = $scanHadTile ? [$this->write('cache/1/0/0-old-source-0', 120)] : [];
@@ -83,7 +95,7 @@ class CachePrunerTest extends TestCase
                 'cacheLockTimeout' => 0,
                 'ops' => [
                     [
-                        'cacheServerName' => 'new-source',
+                        'cacheServerName' => $checkpointNamespace,
                         'urls' => ['file://' . $source],
                         'mimeType' => 'image/png',
                         'cacheBrowserTtl' => 60,
@@ -100,7 +112,7 @@ class CachePrunerTest extends TestCase
             $_GET = $savedGet;
         }
 
-        $checkpoint = $this->tempDir . '/cache/1/0/0-new-source-0';
+        $checkpoint = $this->tempDir . '/cache/1/0/0-' . $checkpointNamespace . '-0';
         $this->assertFileExists($checkpoint);
         clearstatcache(true, $metadata);
         $this->assertSame($metadataMtime, filemtime($metadata));
@@ -121,8 +133,10 @@ class CachePrunerTest extends TestCase
     public static function staleScans(): array
     {
         return [
-            'metadata only' => [false],
-            'obsolete namespace' => [true],
+            'metadata only' => [false, 'new-source'],
+            'obsolete namespace' => [true, 'new-source'],
+            'metadata only with empty checkpoint namespace' => [false, ''],
+            'obsolete namespace with empty checkpoint namespace' => [true, ''],
         ];
     }
 

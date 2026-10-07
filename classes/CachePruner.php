@@ -76,7 +76,7 @@ final class CachePruner
 
             if (preg_match('/^(\d+)-\.metadata$/D', $file->getFilename(), $matches) === 1) {
                 $groups[$matches[1]]['metadata'] = $file->getPathname();
-            } elseif (preg_match('/^(\d+)-.+-\d+$/D', $file->getFilename(), $matches) === 1) {
+            } elseif (preg_match('/^(\d+)-.*-\d+$/D', $file->getFilename(), $matches) === 1) {
                 $groups[$matches[1]]['tiles'][] = $file->getPathname();
             }
         }
@@ -127,7 +127,7 @@ final class CachePruner
 
     private static function hasTiles(string $metadataPath): bool
     {
-        $tilePattern = '/^' . preg_quote(basename($metadataPath, '-.metadata'), '/') . '-.+-\d+$/D';
+        $tilePattern = '/^' . preg_quote(basename($metadataPath, '-.metadata'), '/') . '-.*-\d+$/D';
         foreach (new DirectoryIterator(dirname($metadataPath)) as $file) {
             if (preg_match($tilePattern, $file->getFilename()) === 1 && !$file->isLink() && $file->isFile()) {
                 return true;
