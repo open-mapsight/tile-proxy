@@ -52,6 +52,8 @@ sending output.
 The configuration defines the behavior of the proxy.
 
 * `cacheServerPath`: Base directory for caching tiles and map assets.
+* `cacheLockTimeout`: (Raster tiles, optional) Maximum seconds to wait for a tile's exclusive cache lock.
+  Defaults to `2.85` for compatibility; set it above the full upstream fetch and processing budget.
 * `ops`: (Raster tiles) Operation pipeline for bitmap tile requests.
 * `mapAssetBasePath`: (Mapbox styles) URL path prefix for proxied style JSON, vector tiles, sprites, and glyphs.
 * `styles`: (Mapbox styles) Named style configurations for `MapboxStyleProxy`.
@@ -134,6 +136,42 @@ requests. HTTP(S) fetches go through Guzzle; `file://` URLs are read from disk. 
 
 For tile pipelines, set `upstreamHttp` at the root of the config. A `src` operation can override it with its own
 `upstreamHttp` block.
+
+### Raster cache retention
+
+`cacheServerTtl` controls freshness: an expired tile is refreshed on its next request, and a failed refresh can
+still serve its cached copy. It does not evict unused files.
+
+Call `CachePruner::prune()` from cron or your application's scheduler to remove raster tile files older than a
+separate retention period. This includes obsolete `cacheServerName` namespaces, old metadata without retained
+tiles, and empty directories. The return value counts deleted files. For example, run this daily:
+
+```php
+use OpenMapsight\TileProxy\CachePruner;
+
+$deleted = CachePruner::prune('/var/cache/mapsight-tile-proxy', 30 * 86400);
+```
+
+Choose a retention period longer than your raster `cacheServerTtl` values and any upstream minimum caching
+requirements. Age is measured from tile writes, not filesystem atime; metadata tracks the last completed request.
+Retention limits the age of stored tiles, not total disk usage. The reserved `mapbox-style-proxy` subtree, including
+its empty directories, is excluded from raster cleanup.
+
+The pruner takes the same per-tile lock as `Base`, skips busy tiles without waiting, and rechecks timestamps under
+the lock. Waiting requests reopen metadata that was removed by the pruner before using the cache. Run cleanup
+only after all processes sharing the cache use this version's locking, and leave `yoloOnLockTimeout` disabled.
+Use a POSIX filesystem supporting `flock()` across those processes. Cache directories are reserved for proxy files;
+symlinks are not followed by the pruner.
+
+For an upstream timeout of ten seconds plus tile processing, set `cacheLockTimeout` to a larger budget, for example:
+
+```jsonc
+"cacheLockTimeout": 15,
+"upstreamHttp": { "timeout": 10 }
+```
+
+Zero means a single non-blocking lock attempt. Negative or non-finite timeouts are rejected. Locks are closed on
+both successful requests and failures; the default remains 2.85 seconds for existing deployments.
 
 ### Error logging
 
