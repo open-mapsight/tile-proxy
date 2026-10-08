@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-10-08
+
 ### Added
 
 - `cacheLockTimeout` to configure the raster cache lock wait independently of upstream HTTP timeouts.
@@ -15,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Close cache lock handles on successful and failed requests, and retry when a cleaner replaces the metadata inode or removes an empty cache directory.
+- Preserve checkpoints created by failed requests during pruning, and exclude shared Mapbox asset caches from raster cleanup.
+- Handle concurrent directory removal and recreation during pruning, including caches with an empty namespace.
 
 ## [2.4.1] - 2026-08-28
 
@@ -198,7 +202,8 @@ Rename `publicBasePath` to `mapAssetBasePath` in Mapbox style configs. The old k
 
 - Initial release of the PHP tile proxy with operation pipeline, caching, and tests.
 
-[Unreleased]: https://github.com/open-mapsight/tile-proxy/compare/v2.4.1...HEAD
+[Unreleased]: https://github.com/open-mapsight/tile-proxy/compare/v2.5.0...HEAD
+[2.5.0]: https://github.com/open-mapsight/tile-proxy/compare/v2.4.1...v2.5.0
 [2.4.1]: https://github.com/open-mapsight/tile-proxy/compare/v2.4.0...v2.4.1
 [2.4.0]: https://github.com/open-mapsight/tile-proxy/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/open-mapsight/tile-proxy/compare/v2.2.0...v2.3.0
