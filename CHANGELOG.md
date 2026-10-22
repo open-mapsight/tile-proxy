@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-10-22
+
 ### Added
 
 - `setLayerProperties` vector style transform for selective recolouring, label/layout changes, filters and zoom ranges.
@@ -212,7 +214,8 @@ Rename `publicBasePath` to `mapAssetBasePath` in Mapbox style configs. The old k
 
 - Initial release of the PHP tile proxy with operation pipeline, caching, and tests.
 
-[Unreleased]: https://github.com/open-mapsight/tile-proxy/compare/v2.5.0...HEAD
+[Unreleased]: https://github.com/open-mapsight/tile-proxy/compare/v2.6.0...HEAD
+[2.6.0]: https://github.com/open-mapsight/tile-proxy/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/open-mapsight/tile-proxy/compare/v2.4.1...v2.5.0
 [2.4.1]: https://github.com/open-mapsight/tile-proxy/compare/v2.4.0...v2.4.1
 [2.4.0]: https://github.com/open-mapsight/tile-proxy/compare/v2.3.0...v2.4.0
