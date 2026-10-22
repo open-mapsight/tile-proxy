@@ -42,6 +42,7 @@ class MapboxStyleProxyTest extends TestCase
 
         $tileJson = json_decode($response->body, true);
         $this->assertSame(['/map-assets/tiles/city-default/fromTileJson/0/{z}/{x}/{y}.pbf'], $tileJson['tiles']);
+        $this->assertSame('Source-specific attribution', $tileJson['attribution']);
     }
 
     public function testVectorTileResponseIsProxiedAndCached(): void
@@ -56,6 +57,52 @@ class MapboxStyleProxyTest extends TestCase
 
         $cachedResponse = MapboxStyleProxy::handleRequest($this->cfg, $path);
         $this->assertSame('vector tile bytes', $cachedResponse->body);
+    }
+
+    public function testTileBoundsRejectsRemoteTilesBeforeAnyUpstreamFetch(): void
+    {
+        $this->cfg['styles']['city-default']['tileBounds'] = [10.50, 52.25, 10.55, 52.28];
+        $this->expectException(UserException::class);
+        $this->expectExceptionMessage('outside the configured tileBounds');
+        MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/tiles/city-default/directTiles/0/12/2200/1340.pbf');
+    }
+
+    public function testTileJsonAdvertisesTheRestrictedExtent(): void
+    {
+        $this->cfg['styles']['city-default']['tileBounds'] = [10.50, 52.25, 10.55, 52.28];
+        $response = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/tilejson/city-default/fromTileJson.json');
+        $this->assertSame([10.50, 52.25, 10.55, 52.28], json_decode($response->body, true)['bounds']);
+    }
+
+    public function testStyleAdvertisesTileBoundsOnInlineTileSources(): void
+    {
+        $this->cfg['styles']['city-default']['tileBounds'] = [10.50, 52.25, 10.55, 52.28];
+        $style = json_decode(MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/styles/city-default.json')->body, true);
+        $this->assertSame([10.50, 52.25, 10.55, 52.28], $style['sources']['directTiles']['bounds']);
+        $this->assertArrayNotHasKey('bounds', $style['sources']['fromTileJson']);
+    }
+
+    public function testMalformedTileBoundsAreAConfigurationError(): void
+    {
+        $this->cfg['styles']['city-default']['tileBounds'] = [10.55, 52.25, 10.50, 52.28];
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Invalid tileBounds');
+        MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/tiles/city-default/directTiles/0/12/2200/1340.pbf');
+    }
+
+    public function testInvalidTileCoordinatesAreRejected(): void
+    {
+        $this->expectException(UserException::class);
+        $this->expectExceptionMessage('out of range');
+        MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/tiles/city-default/directTiles/0/31/0/0.pbf');
+    }
+
+    public function testTileBoundsKeepsAnIntersectingCachedTile(): void
+    {
+        $bounds = \OpenMapsight\TileProxy\XyzTile::bbox4326(12, 2200, 1340);
+        $this->cfg['styles']['city-default']['tileBounds'] = [$bounds[0]+0.001, $bounds[1]+0.001, $bounds[2]-0.001, $bounds[3]-0.001];
+        $response = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/tiles/city-default/directTiles/0/12/2200/1340.pbf');
+        $this->assertSame('vector tile bytes', $response->body);
     }
 
     public function testSpriteAndGlyphResponsesAreProxied(): void
@@ -136,6 +183,7 @@ class MapboxStyleProxyTest extends TestCase
             'sources' => [
                 'fromTileJson' => [
                     'type' => 'vector',
+                    'attribution' => 'Source-specific attribution',
                     'url' => '../tilejson/source.json',
                 ],
                 'directTiles' => [
