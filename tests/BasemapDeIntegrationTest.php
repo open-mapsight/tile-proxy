@@ -91,7 +91,8 @@ class BasemapDeIntegrationTest extends TestCase
                         '/gdz_basemapde_vektor/sprites/',
                         '/gdz_basemapde_vektor/fonts/',
                     ],
-                    'laxContentTypes' => true,
+                    // The live BKG glyph endpoint currently omits Content-Type.
+                    'laxContentTypes' => ['application/octet-stream', ''],
                     'cacheTtls' => [
                         'style' => 86400,
                         'tilejson' => 86400,

@@ -11,6 +11,9 @@ class XyzTile
 
     public const MAX_ZOOM = 30;
 
+    /** Web Mercator latitude limit, rounded up as in common TileJSON bounds. */
+    public const MAX_LATITUDE = 85.051129;
+
     /**
      * Web Mercator tile bounds in EPSG:3857 meters: minx, miny, maxx, maxy.
      *

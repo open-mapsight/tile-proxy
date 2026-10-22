@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `setLayerProperties` vector style transform for selective recolouring, label/layout changes, filters and zoom ranges.
+- Optional per-style `tileBounds` for regional vector tile extracts, advertised in TileJSON and inline style sources and checked before upstream access.
+
+### Fixed
+
+- Validate XYZ coordinates on vector tile routes before resolving or fetching upstream templates.
+- Preserve explicit source attribution in rewritten TileJSON responses.
+
 ## [2.5.0] - 2026-10-08
 
 ### Added

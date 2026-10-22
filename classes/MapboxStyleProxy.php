@@ -54,6 +54,9 @@ class MapboxStyleProxy
             $styleCfg = self::getStyleCfg($cfg, $styleName);
             $tileJsonUrl = $source['url'];
             $tileJson = self::decodeJson(self::fetchWithCache($cfg, $styleName, $styleCfg, 'tilejson', $tileJsonUrl));
+            if (isset($source['attribution']) && is_string($source['attribution'])) {
+                $tileJson['attribution'] = $source['attribution'];
+            }
             $tileJson = self::rewriteTileJson($cfg, $styleName, $sourceName, $tileJson, $tileJsonUrl);
 
             return new HttpResponse(
@@ -72,6 +75,7 @@ class MapboxStyleProxy
             $x = $matches[5];
             $y = $matches[6];
             $styleCfg = self::getStyleCfg($cfg, $styleName);
+            self::assertTileAllowed($styleCfg, (int)$z, (int)$x, (int)$y);
             $tileUrl = self::getTileTemplate($cfg, $styleName, $sourceName, $tileIndex);
             $tileUrl = str_replace(['{z}', '{x}', '{y}'], [$z, $x, $y], $tileUrl);
 
@@ -146,6 +150,68 @@ class MapboxStyleProxy
         return ltrim($path, '/');
     }
 
+    private static function assertTileAllowed(array $styleCfg, int $z, int $x, int $y): void
+    {
+        XyzTile::assertValid($z, $x, $y);
+        $bounds = self::getTileBounds($styleCfg);
+        if ($bounds === null) {
+            return;
+        }
+        [$west, $south, $east, $north] = XyzTile::bbox4326($z, $x, $y);
+        if ($east <= $bounds[0] || $west >= $bounds[2] || $north <= $bounds[1] || $south >= $bounds[3]) {
+            throw new UserException('Tile is outside the configured tileBounds');
+        }
+    }
+
+    /**
+     * @return array{float, float, float, float}|null west, south, east, north in EPSG:4326
+     */
+    private static function getTileBounds(array $styleCfg): ?array
+    {
+        if (!isset($styleCfg['tileBounds'])) {
+            return null;
+        }
+        $bounds = $styleCfg['tileBounds'];
+        if (!is_array($bounds) || array_keys($bounds) !== [0, 1, 2, 3]
+            || count(array_filter($bounds, static fn ($n): bool => is_numeric($n) && is_finite((float)$n))) !== 4) {
+            throw new RuntimeException('Invalid tileBounds: expected [west, south, east, north]');
+        }
+        $bounds = array_map('floatval', $bounds);
+        if ($bounds[0] >= $bounds[2] || $bounds[1] >= $bounds[3]
+            || $bounds[0] < -180 || $bounds[2] > 180 || $bounds[1] < -XyzTile::MAX_LATITUDE || $bounds[3] > XyzTile::MAX_LATITUDE) {
+            throw new RuntimeException('Invalid tileBounds: expected west < east and south < north within Web Mercator, without antimeridian crossing');
+        }
+
+        return $bounds;
+    }
+
+    /**
+     * Narrows the bounds a TileJSON document or style source advertises to the configured tileBounds,
+     * so clients do not request tiles the proxy would reject.
+     */
+    private static function restrictAdvertisedBounds(array $styleCfg, array $document, string $what): array
+    {
+        $bounds = self::getTileBounds($styleCfg);
+        if ($bounds === null) {
+            return $document;
+        }
+        $original = $document['bounds'] ?? null;
+        if (!is_array($original) || array_keys($original) !== [0, 1, 2, 3]) {
+            $original = [-180, -XyzTile::MAX_LATITUDE, 180, XyzTile::MAX_LATITUDE];
+        }
+        $document['bounds'] = [
+            max($bounds[0], (float)$original[0]),
+            max($bounds[1], (float)$original[1]),
+            min($bounds[2], (float)$original[2]),
+            min($bounds[3], (float)$original[3]),
+        ];
+        if ($document['bounds'][0] >= $document['bounds'][2] || $document['bounds'][1] >= $document['bounds'][3]) {
+            throw new RuntimeException('tileBounds does not intersect the bounds of ' . $what);
+        }
+
+        return $document;
+    }
+
     private static function rewriteStyle(array $cfg, string $styleName, array $style): array
     {
         $styleCfg = self::getStyleCfg($cfg, $styleName);
@@ -171,6 +237,11 @@ class MapboxStyleProxy
                 }
 
                 if (!empty($source['tiles']) && is_array($source['tiles'])) {
+                    $style['sources'][$sourceName] = self::restrictAdvertisedBounds(
+                        $styleCfg,
+                        $style['sources'][$sourceName],
+                        'source "' . $sourceName . '"'
+                    );
                     $style['sources'][$sourceName]['tiles'] = self::rewriteTileTemplates(
                         $cfg,
                         $styleName,
@@ -205,6 +276,7 @@ class MapboxStyleProxy
 
     private static function rewriteTileJson(array $cfg, string $styleName, string $sourceName, array $tileJson, string $tileJsonUrl): array
     {
+        $tileJson = self::restrictAdvertisedBounds(self::getStyleCfg($cfg, $styleName), $tileJson, 'the upstream TileJSON');
         if (!empty($tileJson['tiles']) && is_array($tileJson['tiles'])) {
             $tileJson['tiles'] = self::rewriteTileTemplates($cfg, $styleName, $sourceName, $tileJson['tiles'], $tileJsonUrl);
         }

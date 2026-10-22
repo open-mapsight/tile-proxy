@@ -457,6 +457,39 @@ Generated asset routes use the same base path:
 /map-assets/glyphs/{styleName}/{encodedGlyphTemplate}/{fontstack}/{range}.pbf
 ```
 
+### Recolouring and adjusting vector styles
+
+`setLayerProperties` changes existing layers without touching their source data. An omitted or empty
+`selector` matches all layers. Selector fields (`ids`, `prefixes`, `sourceLayers`, `types`) combine with AND;
+values within a field combine with OR. Unknown selector fields are rejected to catch configuration typos.
+
+```jsonc
+"transforms": [
+    {
+        "op": "setLayerProperties",
+        "selector": {"sourceLayers": ["Gebaeudeflaeche"], "types": ["fill"]},
+        "properties": {"paint": {"fill-color": "#0071ad", "fill-pattern": null}}
+    },
+    {
+        "op": "setLayerProperties",
+        "selector": {"types": ["symbol"]},
+        "properties": {"paint": {"text-color": "#e1eaf0", "text-halo-color": "#001f33"}}
+    }
+]
+```
+
+Supported properties are `paint`, `layout`, `filter`, `minzoom`, and `maxzoom`. Paint/layout entries are
+merged by property name; null removes an entry. Other properties are replaced (null removes them).
+MapLibre expressions are copied verbatim. Transforms run in order, so later rules can refine earlier rules.
+They apply on every style response; raw upstream assets remain cached, allowing palette edits without
+deleting tile caches. Sources and source URLs cannot be changed by this transform.
+
+For a regional extract, optional per-style `tileBounds: [west, south, east, north]` restricts vector tile
+requests before fetching. Intersecting XYZ tiles are allowed in full; their geometries are not clipped.
+TileJSON responses and style sources with inline `tiles` advertise the intersection with their original
+bounds. Antimeridian-crossing bounds are not supported.
+XYZ coordinates are validated independently of this option. This does not restrict raster-pipeline requests.
+
 ## Examples
 
 ### Layering Tiles
