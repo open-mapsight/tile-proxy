@@ -13,6 +13,8 @@ class MapboxStyleProxy
         'tile' => 604800,
         'sprite' => 2592000,
         'glyph' => 2592000,
+        'font-css' => 2592000,
+        'font' => 2592000,
     ];
 
     public static function run(array $cfg, string $requestPath): void
@@ -129,6 +131,49 @@ class MapboxStyleProxy
             );
         }
 
+        if (preg_match('#^fonts/([^/]+)/([a-z0-9-]+)/([1-9]00)(-italic)?\.css$#D', $routePath, $matches) === 1) {
+            $styleName = rawurldecode($matches[1]);
+            $styleCfg = self::getStyleCfg($cfg, $styleName);
+            $family = $matches[2];
+            $variant = $matches[3] . ($matches[4] ?? '');
+            $font = FontsourceFonts::configuration($styleCfg, $family, $variant);
+            $css = '';
+            if ($font !== null) {
+                $url = FontsourceFonts::baseUrl($family, $font) . '/' . $font['variant'] . '.css';
+                $css = FontsourceFonts::rewriteCss(
+                    self::fetchWithCache($cfg, $styleName, $styleCfg, 'font-css', $url),
+                    $family,
+                    $variant,
+                    $font,
+                    self::publicUrl($cfg, 'fonts/' . rawurlencode($styleName) . '/' . $family)
+                );
+            }
+
+            // Unknown faces deliberately fall back locally, never to the client's default CDN.
+            return new HttpResponse($css, 'text/css', self::getCacheTtl($styleCfg, 'font-css'), null);
+        }
+
+        if (preg_match('#^fonts/([^/]+)/([a-z0-9-]+)/([a-z-]+)-([1-9]00)-(normal|italic)\.woff2$#D', $routePath, $matches) === 1) {
+            $styleName = rawurldecode($matches[1]);
+            $styleCfg = self::getStyleCfg($cfg, $styleName);
+            [, , $family, $subset, $weight, $fontStyle] = $matches;
+            $variant = $weight . ($fontStyle === 'italic' ? '-italic' : '');
+            $font = FontsourceFonts::configuration($styleCfg, $family, $variant);
+            if ($font === null || !in_array($subset, $font['subsets'], true)) {
+                throw new UserException('Font face is not configured');
+            }
+            $upstreamWeight = substr($font['variant'], 0, 3);
+            $upstreamStyle = str_ends_with($font['variant'], '-italic') ? 'italic' : 'normal';
+            $url = FontsourceFonts::baseUrl($family, $font) . '/files/' . $family . '-' . $subset . '-' . $upstreamWeight . '-' . $upstreamStyle . '.woff2';
+
+            return new HttpResponse(
+                self::fetchWithCache($cfg, $styleName, $styleCfg, 'font', $url),
+                'font/woff2',
+                self::getCacheTtl($styleCfg, 'font'),
+                null
+            );
+        }
+
         throw new UserException('Unsupported map asset route');
     }
 
@@ -216,6 +261,13 @@ class MapboxStyleProxy
     {
         $styleCfg = self::getStyleCfg($cfg, $styleName);
         $styleUrl = self::getUpstreamStyleUrl($styleCfg, $styleName);
+
+        // OL ignores the glyphs URL and otherwise silently loads fonts from jsDelivr.
+        // Always replace upstream metadata, including when no fallback faces are configured.
+        $style['metadata']['ol:webfonts'] = self::publicUrl(
+            $cfg,
+            'fonts/' . rawurlencode($styleName) . '/{font-family}/{fontweight}{-fontstyle}.css'
+        );
 
         if (isset($styleCfg['attribution'])) {
             $style['metadata'] ??= [];
@@ -422,6 +474,8 @@ class MapboxStyleProxy
         return match ($resourceType) {
             'style', 'tilejson' => 'application/json',
             'tile', 'glyph' => 'application/x-protobuf',
+            'font-css' => 'text/css',
+            'font' => 'font/woff2',
             'sprite' => str_ends_with($upstreamUrl, '.png') ? 'image/png' : 'application/json',
             default => null,
         };

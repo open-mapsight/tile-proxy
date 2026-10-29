@@ -457,6 +457,66 @@ Generated asset routes use the same base path:
 /map-assets/glyphs/{styleName}/{encodedGlyphTemplate}/{fontstack}/{range}.pbf
 ```
 
+### Web fonts for OpenLayers
+
+OpenLayers/ol-mapbox-style uses CSS fonts, **not** the style's PBF `glyphs`. Without a separate
+font policy it can load fonts directly from jsDelivr. The proxy always overwrites
+`metadata["ol:webfonts"]` with a same-origin template:
+
+```text
+/map-assets/fonts/{styleName}/{font-family}/{fontweight}{-fontstyle}.css
+/map-assets/fonts/{styleName}/{font-family}/{subset}-{weight}-{normal|italic}.woff2
+```
+
+By default no font faces are enabled: CSS requests return an empty stylesheet, so missing fonts
+use the browser's fallback without contacting an external server. To enable a fallback, add to
+the named style configuration:
+
+```jsonc
+"webfonts": {
+    "ubuntu": {
+        "version": "5.2.8",
+        "faces": ["400", "400-italic", "700"],
+        "subsets": ["latin", "latin-ext"]
+    }
+},
+"allowedHosts": ["example.com", "cdn.jsdelivr.net"],
+"allowedPathPrefixes": ["/styles/", "/tiles/", "/npm/@fontsource/ubuntu@5.2.8/"]
+```
+
+Versions must be fixed. Only configured families, faces and subsets can be fetched. The server
+fetches Fontsource CSS once per face, keeps only the selected `@font-face` blocks and rewrites
+their sources to local WOFF2 routes. Unicode ranges are preserved; WOFF alternatives and other
+subsets are removed. Both CSS and font bytes use the existing disk/stale cache and `upstreamHttp`
+settings. Optional `cacheTtls` keys `font-css` and `font` default to 30 days.
+
+Use the host's existing fonts by mapping exact style font names:
+
+```jsonc
+"transforms": [{
+    "op": "mapFonts",
+    "fonts": {
+        "Noto Sans Regular": "Ubuntu Regular",
+        "Roboto Medium": "Ubuntu SemiBold"
+    }
+}]
+```
+
+`mapFonts` replaces matching names inside `text-font` values, including expression literals and
+formatted text overrides. Unmapped names and other layout/paint properties are retained. For
+system fonts, use `setLayerProperties` with `layout: {"text-font": ["sans-serif"]}`.
+
+Match the host's CSS weights exactly. If the host declares a face under another weight, `faces`
+can instead map requested to upstream variants, e.g. `{"600": "500", "600-italic": "500-italic"}`.
+This serves Fontsource's Medium face as CSS weight 600. Existing page fonts are used first;
+the proxy is only a fallback. Keep the font license and attribution available when redistributing
+font files (Ubuntu uses the Ubuntu Font Licence; licenses differ by family).
+
+After deploying, invalidate previously cached style JSON in clients/CDNs to activate the new
+metadata and font mapping. Also invalidate cached font CSS when enabling or changing faces,
+including empty responses for previously unconfigured faces. Raw upstream style caches do not
+need deleting.
+
 ### Recolouring and adjusting vector styles
 
 `setLayerProperties` changes existing layers without touching their source data. An omitted or empty

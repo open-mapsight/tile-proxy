@@ -21,6 +21,7 @@ class MapboxStyleTransforms
                 'removeLayersById' => static::removeLayersById($style, $transform['ids'] ?? []),
                 'removeLayersByIdContains' => static::removeLayersByIdContains($style, (string)($transform['contains'] ?? '')),
                 'setLayerProperties' => static::setLayerProperties($style, $transform),
+                'mapFonts' => static::mapFonts($style, $transform['fonts'] ?? []),
                 'removeLayersByIdPrefixExcept' => static::removeLayersByIdPrefixExcept(
                     $style,
                     $transform['prefixes'] ?? [],
@@ -29,6 +30,50 @@ class MapboxStyleTransforms
                 default => throw new RuntimeException('Unsupported style transform: "' . (string)($transform['op'] ?? '') . '"'),
             };
         }
+
+        return $style;
+    }
+
+    /** Map font names in text-font stacks, literal expressions, and formatted text overrides. */
+    public static function mapFonts(array $style, array $fonts): array
+    {
+        foreach ($fonts as $from => $to) {
+            if (!is_string($from) || !is_string($to) || $to === '') {
+                throw new RuntimeException('mapFonts requires a map of font names');
+            }
+        }
+        $mapNames = static function ($value) use (&$mapNames, $fonts) {
+            if (!is_array($value)) {
+                return $value;
+            }
+            // Property/variable names and match labels are not font names.
+            $op = $value[0] ?? null;
+            if (in_array($op, ['get', 'has', 'var'], true)) {
+                return $value;
+            }
+            if ($op === 'match' || $op === 'case') {
+                for ($i = $op === 'match' ? 3 : 2, $count = count($value); $i < $count - 1; $i += 2) {
+                    $value[$i] = $mapNames($value[$i]);
+                }
+                $value[count($value) - 1] = $mapNames($value[count($value) - 1]);
+                return $value;
+            }
+            if (array_is_list($value) && array_filter($value, 'is_string') === $value) {
+                return array_map(static fn (string $name): string => $fonts[$name] ?? $name, $value);
+            }
+            return array_map($mapNames, $value);
+        };
+        $visit = static function (array $value) use (&$visit, $mapNames): array {
+            foreach ($value as $key => $child) {
+                if ($key === 'text-font') {
+                    $value[$key] = $mapNames($child);
+                } elseif (is_array($child)) {
+                    $value[$key] = $visit($child);
+                }
+            }
+            return $value;
+        };
+        $style['layers'] = $visit($style['layers'] ?? []);
 
         return $style;
     }
