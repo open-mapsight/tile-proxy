@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-10-29
+
 ### Added
 
 - Same-origin CSS/WOFF2 font proxy for allow-listed, version-pinned Fontsource faces, with selectable subsets and weight aliases.
@@ -229,7 +231,8 @@ Rename `publicBasePath` to `mapAssetBasePath` in Mapbox style configs. The old k
 
 - Initial release of the PHP tile proxy with operation pipeline, caching, and tests.
 
-[Unreleased]: https://github.com/open-mapsight/tile-proxy/compare/v2.6.1...HEAD
+[Unreleased]: https://github.com/open-mapsight/tile-proxy/compare/v2.7.0...HEAD
+[2.7.0]: https://github.com/open-mapsight/tile-proxy/compare/v2.6.1...v2.7.0
 [2.6.1]: https://github.com/open-mapsight/tile-proxy/compare/v2.6.0...v2.6.1
 [2.6.0]: https://github.com/open-mapsight/tile-proxy/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/open-mapsight/tile-proxy/compare/v2.4.1...v2.5.0
