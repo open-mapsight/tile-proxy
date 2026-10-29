@@ -25,7 +25,7 @@ class EncodeOp implements OpHandler
                 $res->setData(Utils::imageToBytes($mimeType, $img, $quality));
                 $res->mimeType = $mimeType;
             } finally {
-                imagedestroy($img);
+                unset($img);
             }
         } elseif (isset($cfg['mimeType']) && is_string($cfg['mimeType'])) {
             $res->mimeType = $cfg['mimeType'];

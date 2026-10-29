@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Stop calling `imagedestroy()` in the `encode` op. It is deprecated in PHP 8.5 and has had no effect since PHP 8.0, so PHP 8.5 logged a deprecation for every re-encoded tile.
+
 ## [2.6.0] - 2026-10-22
 
 ### Added
