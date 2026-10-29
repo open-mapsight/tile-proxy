@@ -119,7 +119,6 @@ class PrefixConfigTest extends TestCase
         $color = imagecolorallocate($img, $r, $g, $b);
         imagefill($img, 0, 0, $color);
         imagepng($img, $path);
-        imagedestroy($img);
 
         return $path;
     }

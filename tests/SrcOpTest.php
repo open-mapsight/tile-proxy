@@ -117,7 +117,6 @@ class SrcOpTest extends TestCase
         $red = imagecolorallocate($img, 200, 10, 10);
         imagefill($img, 0, 0, $red);
         imagepng($img, $this->tempDir . '/tile.png');
-        imagedestroy($img);
     }
 
     protected function tearDown(): void

@@ -227,7 +227,6 @@ class ProcessorTest extends TestCase
         $blue = imagecolorallocate($baseImg, 0, 0, 255);
         imagefill($baseImg, 0, 0, $blue);
         imagepng($baseImg, $baseFile);
-        imagedestroy($baseImg);
 
         // Overlay: Semi-transparent red
         $overlayImg = imagecreatetruecolor(10, 10);
@@ -236,7 +235,6 @@ class ProcessorTest extends TestCase
         $transparentRed = imagecolorallocatealpha($overlayImg, 255, 0, 0, 64); // 50% opacity
         imagefill($overlayImg, 0, 0, $transparentRed);
         imagepng($overlayImg, $overlayFile);
-        imagedestroy($overlayImg);
 
         $ops = [
             [
@@ -288,7 +286,6 @@ class ProcessorTest extends TestCase
         // Create a dummy 1x1 png tile
         $img = imagecreatetruecolor(1, 1);
         imagepng($img, $this->tileFile);
-        imagedestroy($img);
     }
 
     protected function tearDown(): void
