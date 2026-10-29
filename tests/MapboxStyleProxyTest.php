@@ -45,6 +45,61 @@ class MapboxStyleProxyTest extends TestCase
         $this->assertSame('Source-specific attribution', $tileJson['attribution']);
     }
 
+    public function testFontMetadataOverridesUpstreamAndUnknownFontsStayLocal(): void
+    {
+        $path = $this->assetDir . '/styles/city.json';
+        $upstream = json_decode(file_get_contents($path), true);
+        $upstream['metadata']['ol:webfonts'] = 'https://external.example/{font-family}.css';
+        file_put_contents($path, json_encode($upstream));
+        $style = json_decode(MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/styles/city-default.json')->body, true);
+        $this->assertSame('/map-assets/fonts/city-default/{font-family}/{fontweight}{-fontstyle}.css', $style['metadata']['ol:webfonts']);
+        $response = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/fonts/city-default/unknown-font/400.css');
+        $this->assertSame('text/css', $response->mimeType);
+        $this->assertSame('', $response->body);
+    }
+
+    public function testFontCssAndBytesUsePinnedCachedAssetsAndSelectedSubsets(): void
+    {
+        $this->cfg['styles']['city-default']['webfonts'] = ['ubuntu' => [
+            'version' => '5.2.8', 'faces' => ['600' => '500'], 'subsets' => ['latin', 'latin-ext'],
+        ]];
+        $this->cfg['styles']['city-default']['allowedHosts'][] = 'cdn.jsdelivr.net';
+        $this->cfg['styles']['city-default']['allowedPathPrefixes'][] = '/npm/@fontsource/ubuntu@5.2.8/';
+        $css = '@import "https://external.example/unwanted.css";';
+        foreach (['latin', 'latin-ext', 'greek'] as $subset) {
+            $css .= "@font-face {font-family: 'Ubuntu'; font-style: normal; font-weight: 500; src: url(./files/ubuntu-$subset-500-normal.woff2) format('woff2'), url(./files/ubuntu-$subset-500-normal.woff) format('woff'); unicode-range: U+0000-00FF;}";
+        }
+        foreach (['font-css' => ['500.css', $css], 'font' => ['files/ubuntu-latin-500-normal.woff2', 'font bytes']] as $type => [$file, $body]) {
+            $dir = $this->cacheDir . '/mapbox-style-proxy/city-default/' . $type;
+            mkdir($dir, 0777, true);
+            file_put_contents($dir . '/' . sha1('https://cdn.jsdelivr.net/npm/@fontsource/ubuntu@5.2.8/' . $file), $body);
+        }
+        $response = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/fonts/city-default/ubuntu/600.css');
+        $this->assertSame(2, substr_count($response->body, '@font-face'));
+        $this->assertSame(2, substr_count($response->body, 'font-weight: 600;'));
+        $this->assertStringContainsString('unicode-range: U+0000-00FF;', $response->body);
+        $this->assertStringContainsString('/map-assets/fonts/city-default/ubuntu/latin-ext-600-normal.woff2', $response->body);
+        $this->assertStringNotContainsString('https:', $response->body);
+        $this->assertStringNotContainsString('greek', $response->body);
+        $this->assertStringNotContainsString("format('woff')", $response->body);
+        $unconfigured = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/fonts/city-default/ubuntu/500.css');
+        $this->assertSame('', $unconfigured->body);
+        $font = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/fonts/city-default/ubuntu/latin-600-normal.woff2');
+        $this->assertSame('font/woff2', $font->mimeType);
+        $this->assertSame('font bytes', $font->body);
+
+        $this->expectException(UserException::class);
+        MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/fonts/city-default/ubuntu/greek-600-normal.woff2');
+    }
+
+    public function testFontFetchingStillEnforcesUpstreamAllowList(): void
+    {
+        $this->cfg['styles']['city-default']['webfonts'] = ['ubuntu' => ['version' => '5.2.8', 'faces' => ['400']]];
+        $this->expectException(UserException::class);
+        $this->expectExceptionMessage('Upstream URL is not allowed');
+        MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/fonts/city-default/ubuntu/400.css');
+    }
+
     public function testVectorTileResponseIsProxiedAndCached(): void
     {
         $path = '/map-assets/tiles/city-default/directTiles/0/12/2200/1340.pbf';

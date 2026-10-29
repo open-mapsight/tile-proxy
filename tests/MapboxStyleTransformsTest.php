@@ -9,6 +9,34 @@ use RuntimeException;
 
 class MapboxStyleTransformsTest extends TestCase
 {
+    public function testMapFontsKeepsExpressionsAndOtherTextUnchanged(): void
+    {
+        $style = ['layers' => [[
+            'id' => 'label', 'type' => 'symbol',
+            'layout' => [
+                'text-font' => ['case', ['get', 'bold'], ['literal', ['Roboto Medium']], ['literal', ['Noto Sans Regular', 'sans-serif']]],
+                'text-field' => ['format', 'Roboto Medium', ['text-font' => ['literal', ['Roboto Medium']]]],
+            ],
+        ]]];
+        $result = MapboxStyleTransforms::apply($style, ['transforms' => [[
+            'op' => 'mapFonts', 'fonts' => ['Roboto Medium' => 'Ubuntu SemiBold', 'Noto Sans Regular' => 'Ubuntu Regular'],
+        ]]]);
+        $this->assertSame(['case', ['get', 'bold'], ['literal', ['Ubuntu SemiBold']], ['literal', ['Ubuntu Regular', 'sans-serif']]], $result['layers'][0]['layout']['text-font']);
+        $this->assertSame(['format', 'Roboto Medium', ['text-font' => ['literal', ['Ubuntu SemiBold']]]], $result['layers'][0]['layout']['text-field']);
+        $this->assertSame('label', $result['layers'][0]['id']);
+    }
+
+    public function testFontMappingDoesNotChangePropertyNamesOrMatchLabels(): void
+    {
+        $expression = ['match', ['get', 'Roboto Medium'], ['Roboto Medium', 'Noto Sans Regular'], ['literal', ['Roboto Medium']], ['get', 'Noto Sans Regular']];
+        $result = MapboxStyleTransforms::apply(['layers' => [['layout' => ['text-font' => $expression]]]], ['transforms' => [[
+            'op' => 'mapFonts', 'fonts' => ['Roboto Medium' => 'Ubuntu SemiBold', 'Noto Sans Regular' => 'Ubuntu Regular'],
+        ]]]);
+        $expected = $expression;
+        $expected[3] = ['literal', ['Ubuntu SemiBold']];
+        $this->assertSame($expected, $result['layers'][0]['layout']['text-font']);
+    }
+
     public function testSelectiveRecolourKeepsFiltersAndExpressionsIntact(): void
     {
         $style = ['layers' => [

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Same-origin CSS/WOFF2 font proxy for allow-listed, version-pinned Fontsource faces, with selectable subsets and weight aliases.
+- `mapFonts` style transform for reusing host fonts, including formatted text font stacks.
+
+### Fixed
+
+- Override style `ol:webfonts` metadata with a local fallback endpoint so OpenLayers does not silently request fonts from third-party CDNs.
+
 ## [2.6.1] - 2026-10-29
 
 ### Fixed
