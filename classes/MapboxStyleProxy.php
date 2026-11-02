@@ -264,6 +264,7 @@ class MapboxStyleProxy
 
         // OL ignores the glyphs URL and otherwise silently loads fonts from jsDelivr.
         // Always replace upstream metadata, including when no fallback faces are configured.
+        // applyStyle() treats false metadata as absent, so disabled fonts still need this local template.
         $style['metadata']['ol:webfonts'] = self::publicUrl(
             $cfg,
             'fonts/' . rawurlencode($styleName) . '/{font-family}/{fontweight}{-fontstyle}.css'
