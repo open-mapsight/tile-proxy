@@ -460,20 +460,26 @@ Generated asset routes use the same base path:
 ### Web fonts for OpenLayers
 
 OpenLayers/ol-mapbox-style uses CSS fonts, **not** the style's PBF `glyphs`. Without a separate
-font policy it can load fonts directly from jsDelivr. The proxy always overwrites
-`metadata["ol:webfonts"]` with a same-origin template:
+font policy it can load fonts directly from jsDelivr. Set `"olWebfonts": true` in the named
+style configuration to opt into rewriting font metadata. When omitted or `false`, the proxy
+leaves `ol:webfonts` metadata untouched, including any upstream value, even if `webfonts`
+families are configured. Other renderers can continue using the proxied PBF `glyphs`.
+
+With `olWebfonts` enabled, the proxy sets a same-origin `metadata["ol:webfonts"]` template,
+replacing any upstream value:
 
 ```text
 /map-assets/fonts/{styleName}/{font-family}/{fontweight}{-fontstyle}.css
 /map-assets/fonts/{styleName}/{font-family}/{subset}-{weight}-{normal|italic}.woff2
 ```
 
-By default no font faces are enabled: CSS requests return an empty stylesheet, so missing fonts
-use the browser's fallback without contacting an external server. To enable a fallback, add
-`webfonts` to the named style configuration. The proxy sets `ol:webfonts` automatically; no client-side URL
-mapping is needed:
+`webfonts` controls which font families and weights the proxy can download. With `olWebfonts`
+enabled and `webfonts` omitted, `false`, or empty, CSS requests return an empty stylesheet,
+so missing fonts use the browser's fallback. To enable selected fallback faces, configure them
+below. No client-side URL mapping is needed:
 
 ```jsonc
+"olWebfonts": true,
 "webfonts": {
     "ubuntu": {
         "version": "5.2.8",
@@ -513,11 +519,12 @@ This serves Fontsource's Medium face as CSS weight 600. Existing page fonts are 
 the proxy is only a fallback. Keep the font license and attribution available when redistributing
 font files (Ubuntu uses the Ubuntu Font Licence; licenses differ by family).
 
-Disable all proxied web fonts with `"webfonts": false`. To disable one family, set its entry to
-`false`. To disable or substitute individual weights (including italic variants), use a `faces`
-object instead of a list:
+Disable all proxy font downloads with `"webfonts": false`; this does not change `olWebfonts`.
+To disable one family, set its entry to `false`. To disable or substitute individual weights
+(including italic variants), use a `faces` object instead of a list:
 
 ```jsonc
+"olWebfonts": true,
 "webfonts": {
     "noto-sans": false,
     "ubuntu": {
@@ -538,8 +545,8 @@ Disabling affects proxy downloads; it does not remove fonts from style stacks or
 of fonts already installed or loaded by the host. Use `mapFonts` to substitute a style font
 family or weight in the rendered labels.
 
-Disabled fonts retain the local `ol:webfonts` template: their CSS endpoint returns an empty
-stylesheet and their WOFF2 endpoint rejects requests. This also works with existing
+When `olWebfonts` is enabled, disabled fonts retain the local `ol:webfonts` template: their CSS
+endpoint returns an empty stylesheet and their WOFF2 endpoint rejects requests. This also works with existing
 ol-mapbox-style versions. Setting `ol:webfonts` metadata to `false` is not a reliable way to
 disable loading: `applyStyle()` treats it as absent and falls back to its `webfonts` option.
 The client-side `webfonts: false` option added by
