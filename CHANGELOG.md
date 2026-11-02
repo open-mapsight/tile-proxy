@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Per-style `webfonts: false`, per-family disabling, and per-face `false` entries to control proxy font downloads.
+
+### Changed
+
+- Only generate local `ol:webfonts` metadata when the style configuration sets `olWebfonts: true`; otherwise preserve upstream font metadata and renderer behavior.
+
 ## [2.7.0] - 2026-10-29
 
 ### Added

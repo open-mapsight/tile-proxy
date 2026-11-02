@@ -10,9 +10,19 @@ final class FontsourceFonts
 {
     public static function configuration(array $styleCfg, string $family, string $variant): ?array
     {
-        $font = $styleCfg['webfonts'][$family] ?? null;
-        if (!is_array($font)) {
+        $webfonts = $styleCfg['webfonts'] ?? [];
+        if ($webfonts === false) {
             return null;
+        }
+        if (!is_array($webfonts)) {
+            throw new RuntimeException('webfonts requires a font configuration map or false');
+        }
+        $font = $webfonts[$family] ?? false;
+        if ($font === false) {
+            return null;
+        }
+        if (!is_array($font)) {
+            throw new RuntimeException('Invalid Fontsource font configuration');
         }
         $faces = $font['faces'] ?? [];
         if (!is_array($faces)) {
@@ -21,14 +31,14 @@ final class FontsourceFonts
         $upstreamVariant = array_is_list($faces)
             ? (in_array($variant, $faces, true) ? $variant : null)
             : ($faces[$variant] ?? null);
-        if ($upstreamVariant === null) {
+        if ($upstreamVariant === null || $upstreamVariant === false) {
             return null;
         }
         if (!is_string($upstreamVariant) || preg_match('/^[1-9]00(?:-italic)?$/D', $upstreamVariant) !== 1) {
             throw new RuntimeException('Invalid Fontsource face');
         }
         $font['variant'] = $upstreamVariant;
-        if (preg_match('/^\d+\.\d+\.\d+$/D', $font['version'] ?? '') !== 1) {
+        if (!is_string($font['version'] ?? null) || preg_match('/^\d+\.\d+\.\d+$/D', $font['version']) !== 1) {
             throw new RuntimeException('Fontsource requires a fixed version');
         }
         $font['subsets'] ??= ['latin', 'latin-ext'];

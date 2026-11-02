@@ -5,6 +5,7 @@ namespace OpenMapsight\TileProxy\Tests;
 
 use OpenMapsight\TileProxy\MapboxStyleProxy;
 use OpenMapsight\TileProxy\UserException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 class MapboxStyleProxyTest extends TestCase
@@ -47,6 +48,8 @@ class MapboxStyleProxyTest extends TestCase
 
     public function testFontMetadataOverridesUpstreamAndUnknownFontsStayLocal(): void
     {
+        $this->cfg['styles']['city-default']['olWebfonts'] = true;
+        $this->cfg['styles']['city-default']['webfonts'] = [];
         $path = $this->assetDir . '/styles/city.json';
         $upstream = json_decode(file_get_contents($path), true);
         $upstream['metadata']['ol:webfonts'] = 'https://external.example/{font-family}.css';
@@ -56,6 +59,49 @@ class MapboxStyleProxyTest extends TestCase
         $response = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/fonts/city-default/unknown-font/400.css');
         $this->assertSame('text/css', $response->mimeType);
         $this->assertSame('', $response->body);
+    }
+
+    public function testUnconfiguredWebfontsLeaveMetadataAbsent(): void
+    {
+        unset($this->cfg['styles']['city-default']['attribution']);
+        $style = json_decode(MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/styles/city-default.json')->body, true);
+        $this->assertArrayNotHasKey('metadata', $style);
+    }
+
+    #[DataProvider('upstreamFontMetadata')]
+    public function testStylesWithoutOlWebfontsOptInPreserveUpstreamMetadata(array $metadata, array $fontCfg): void
+    {
+        $this->cfg['styles']['city-default'] = array_replace($this->cfg['styles']['city-default'], $fontCfg);
+        $path = $this->assetDir . '/styles/city.json';
+        $upstream = json_decode(file_get_contents($path), true);
+        $upstream['metadata'] = $metadata;
+        file_put_contents($path, json_encode($upstream));
+        unset($this->cfg['styles']['city-default']['attribution']);
+        $style = json_decode(MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/styles/city-default.json')->body, true);
+        $this->assertSame($metadata, $style['metadata']);
+    }
+
+    public static function upstreamFontMetadata(): array
+    {
+        return [
+            'other metadata only' => [['custom' => 'retained'], ['webfonts' => false]],
+            'upstream template' => [
+                ['custom' => 'retained', 'ol:webfonts' => 'https://external.example/{font-family}.css'],
+                ['webfonts' => ['ubuntu' => ['version' => '5.2.8', 'faces' => ['400']]]],
+            ],
+            'explicit opt-out' => [
+                ['custom' => 'retained', 'ol:webfonts' => false],
+                ['olWebfonts' => false, 'webfonts' => ['ubuntu' => ['version' => '5.2.8', 'faces' => ['400']]]],
+            ],
+        ];
+    }
+
+    public function testOlWebfontsOptInWithoutConfiguredFacesUsesLocalEmptyCss(): void
+    {
+        $this->cfg['styles']['city-default']['olWebfonts'] = true;
+        $style = json_decode(MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/styles/city-default.json')->body, true);
+        $this->assertSame('/map-assets/fonts/city-default/{font-family}/{fontweight}{-fontstyle}.css', $style['metadata']['ol:webfonts']);
+        $this->assertSame('', MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/fonts/city-default/ubuntu/400.css')->body);
     }
 
     public function testFontCssAndBytesUsePinnedCachedAssetsAndSelectedSubsets(): void
@@ -98,6 +144,77 @@ class MapboxStyleProxyTest extends TestCase
         $this->expectException(UserException::class);
         $this->expectExceptionMessage('Upstream URL is not allowed');
         MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/fonts/city-default/ubuntu/400.css');
+    }
+
+    public function testItalicWeightAliasAndDisabledWeightAreIndependent(): void
+    {
+        $this->cfg['styles']['city-default']['webfonts'] = ['ubuntu' => [
+            'version' => '5.2.8', 'faces' => ['600-italic' => '500-italic', '700' => false], 'subsets' => ['latin'],
+        ]];
+        $this->cfg['styles']['city-default']['allowedHosts'][] = 'cdn.jsdelivr.net';
+        $this->cfg['styles']['city-default']['allowedPathPrefixes'][] = '/npm/@fontsource/ubuntu@5.2.8/';
+        $css = "@font-face {font-family: 'Ubuntu'; font-style: italic; font-weight: 500; src: url('./files/ubuntu-latin-500-italic.woff2') format('woff2'); unicode-range: U+0000-00FF;}";
+        foreach (['font-css' => ['500-italic.css', $css], 'font' => ['files/ubuntu-latin-500-italic.woff2', 'italic bytes']] as $type => [$file, $body]) {
+            $dir = $this->cacheDir . '/mapbox-style-proxy/city-default/' . $type;
+            mkdir($dir, 0777, true);
+            file_put_contents($dir . '/' . sha1('https://cdn.jsdelivr.net/npm/@fontsource/ubuntu@5.2.8/' . $file), $body);
+        }
+        $response = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/fonts/city-default/ubuntu/600-italic.css');
+        $this->assertStringContainsString('font-weight: 600;', $response->body);
+        $this->assertStringContainsString('font-style: italic;', $response->body);
+        $this->assertStringContainsString('/map-assets/fonts/city-default/ubuntu/latin-600-italic.woff2', $response->body);
+        $font = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/fonts/city-default/ubuntu/latin-600-italic.woff2');
+        $this->assertSame('italic bytes', $font->body);
+        foreach (['600', '700'] as $variant) {
+            $this->assertSame('', MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/fonts/city-default/ubuntu/' . $variant . '.css')->body);
+        }
+    }
+
+    #[DataProvider('disabledWebfonts')]
+    public function testDisabledFontsKeepLocalMetadataAndCannotFetchAssets(array|false $webfonts): void
+    {
+        // No CDN URL is allowed: either route fetching upstream would fail this test.
+        $this->cfg['styles']['city-default']['olWebfonts'] = true;
+        $this->cfg['styles']['city-default']['webfonts'] = $webfonts;
+        $style = json_decode(MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/styles/city-default.json')->body, true);
+        $this->assertSame('/map-assets/fonts/city-default/{font-family}/{fontweight}{-fontstyle}.css', $style['metadata']['ol:webfonts']);
+        $css = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/fonts/city-default/ubuntu/700.css');
+        $this->assertSame('text/css', $css->mimeType);
+        $this->assertSame('', $css->body);
+
+        $this->expectException(UserException::class);
+        $this->expectExceptionMessage('Font face is not configured');
+        MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/fonts/city-default/ubuntu/latin-700-normal.woff2');
+    }
+
+    public static function disabledWebfonts(): array
+    {
+        return [
+            'empty configuration' => [[]],
+            'all fonts' => [false],
+            'family' => [['ubuntu' => false]],
+            'weight' => [['ubuntu' => ['version' => '5.2.8', 'faces' => ['400' => '400', '700' => false]]]],
+            'omitted weight' => [['ubuntu' => ['version' => '5.2.8', 'faces' => ['400']]]],
+        ];
+    }
+
+    public function testFontMappingAndMetadataUseTransformedStyleAndConfiguredBasePath(): void
+    {
+        $path = $this->assetDir . '/styles/city.json';
+        $upstream = json_decode(file_get_contents($path), true);
+        $upstream['metadata'] = ['custom' => 'retained', 'ol:webfonts' => 'https://external.example/fonts.css'];
+        $upstream['layers'][5]['layout']['text-font'] = ['Noto Sans Regular', 'sans-serif'];
+        file_put_contents($path, json_encode($upstream));
+        $this->cfg['mapAssetBasePath'] = '/assets/maps';
+        $this->cfg['styles']['city-default']['olWebfonts'] = true;
+        $this->cfg['styles']['city-default']['webfonts'] = ['ubuntu' => ['version' => '5.2.8', 'faces' => ['400']]];
+        $this->cfg['styles']['city-default']['transforms'][] = [
+            'op' => 'mapFonts', 'fonts' => ['Noto Sans Regular' => 'Ubuntu Regular'],
+        ];
+        $style = json_decode(MapboxStyleProxy::handleRequest($this->cfg, '/assets/maps/styles/city-default.json')->body, true);
+        $this->assertSame('/assets/maps/fonts/city-default/{font-family}/{fontweight}{-fontstyle}.css', $style['metadata']['ol:webfonts']);
+        $this->assertSame('retained', $style['metadata']['custom']);
+        $this->assertSame(['Ubuntu Regular', 'sans-serif'], $style['layers'][1]['layout']['text-font']);
     }
 
     public function testVectorTileResponseIsProxiedAndCached(): void

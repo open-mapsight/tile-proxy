@@ -460,19 +460,26 @@ Generated asset routes use the same base path:
 ### Web fonts for OpenLayers
 
 OpenLayers/ol-mapbox-style uses CSS fonts, **not** the style's PBF `glyphs`. Without a separate
-font policy it can load fonts directly from jsDelivr. The proxy always overwrites
-`metadata["ol:webfonts"]` with a same-origin template:
+font policy it can load fonts directly from jsDelivr. Set `"olWebfonts": true` in the named
+style configuration to opt into rewriting font metadata. When omitted or `false`, the proxy
+leaves `ol:webfonts` metadata untouched, including any upstream value, even if `webfonts`
+families are configured. Other renderers can continue using the proxied PBF `glyphs`.
+
+With `olWebfonts` enabled, the proxy sets a same-origin `metadata["ol:webfonts"]` template,
+replacing any upstream value:
 
 ```text
 /map-assets/fonts/{styleName}/{font-family}/{fontweight}{-fontstyle}.css
 /map-assets/fonts/{styleName}/{font-family}/{subset}-{weight}-{normal|italic}.woff2
 ```
 
-By default no font faces are enabled: CSS requests return an empty stylesheet, so missing fonts
-use the browser's fallback without contacting an external server. To enable a fallback, add to
-the named style configuration:
+`webfonts` controls which font families and weights the proxy can download. With `olWebfonts`
+enabled and `webfonts` omitted, `false`, or empty, CSS requests return an empty stylesheet,
+so missing fonts use the browser's fallback. To enable selected fallback faces, configure them
+below. No client-side URL mapping is needed:
 
 ```jsonc
+"olWebfonts": true,
 "webfonts": {
     "ubuntu": {
         "version": "5.2.8",
@@ -511,6 +518,47 @@ can instead map requested to upstream variants, e.g. `{"600": "500", "600-italic
 This serves Fontsource's Medium face as CSS weight 600. Existing page fonts are used first;
 the proxy is only a fallback. Keep the font license and attribution available when redistributing
 font files (Ubuntu uses the Ubuntu Font Licence; licenses differ by family).
+
+Disable all proxy font downloads with `"webfonts": false`; this does not change `olWebfonts`.
+To disable one family, set its entry to `false`. To disable or substitute individual weights
+(including italic variants), use a `faces` object instead of a list:
+
+```jsonc
+"olWebfonts": true,
+"webfonts": {
+    "noto-sans": false,
+    "ubuntu": {
+        "version": "5.2.8",
+        "faces": {
+            "400": "400",
+            "600": "500",
+            "600-italic": "500-italic",
+            "700": false
+        },
+        "subsets": ["latin", "latin-ext"]
+    }
+}
+```
+
+Here 600 uses the upstream 500 face, while 700 and every unlisted variant are disabled.
+Disabling affects proxy downloads; it does not remove fonts from style stacks or prevent use
+of fonts already installed or loaded by the host. Use `mapFonts` to substitute a style font
+family or weight in the rendered labels.
+
+When `olWebfonts` is enabled, disabled fonts retain the local `ol:webfonts` template: their CSS
+endpoint returns an empty stylesheet and their WOFF2 endpoint rejects requests. This also works with existing
+ol-mapbox-style versions. Setting `ol:webfonts` metadata to `false` is not a reliable way to
+disable loading: `applyStyle()` treats it as absent and falls back to its `webfonts` option.
+The client-side `webfonts: false` option added by
+[ol-mapbox-style #1564](https://github.com/openlayers/ol-mapbox-style/pull/1564)
+disables automatic loading for styles without a metadata template; it does not override the
+template emitted by this proxy.
+
+Formatted text needs an additional client setting: the current ol-mapbox-style renderer calls
+its font loader without forwarding the metadata template for rich-text sections. With the
+change from #1564, pass `{webfonts: false}` to `apply()` / `applyStyle()` to disable that fallback
+CDN path while ordinary labels continue using the proxy template. Fonts for those rich-text
+sections must already be available on the host page.
 
 After deploying, invalidate previously cached style JSON in clients/CDNs to activate the new
 metadata and font mapping. Also invalidate cached font CSS when enabling or changing faces,
