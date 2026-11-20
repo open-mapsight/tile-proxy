@@ -63,9 +63,46 @@ class Utils
         }
     }
 
+    public static function isImageMimeType(?string $mimeType): bool
+    {
+        return $mimeType !== null && in_array($mimeType, self::SUPPORTED_IMAGE_MIME_TYPES, true);
+    }
+
+    /**
+     * True if the bytes are an image that can be cached: the header must be a known image
+     * format, and formats this GD build can read must also decode. Formats GD cannot read
+     * (for example WebP without GD WebP support) are accepted on their header alone.
+     */
+    public static function isDecodableImage(string $data): bool
+    {
+        if ($data === '') {
+            return false;
+        }
+        $info = @getimagesizefromstring($data);
+        if ($info === false) {
+            return false;
+        }
+        $gdType = match ($info[2]) {
+            IMAGETYPE_PNG => IMG_PNG,
+            IMAGETYPE_JPEG => IMG_JPG,
+            IMAGETYPE_GIF => IMG_GIF,
+            IMAGETYPE_WEBP => IMG_WEBP,
+            IMAGETYPE_BMP => IMG_BMP,
+            default => 0,
+        };
+        if ($gdType === 0 || (imagetypes() & $gdType) === 0) {
+            return true;
+        }
+
+        return @imagecreatefromstring($data) !== false;
+    }
+
     public static function bytesToImage(string $data)
     {
-        $img = imageCreateFromString($data);
+        $img = @imageCreateFromString($data);
+        if ($img === false) {
+            throw new RuntimeException('Image data could not be decoded');
+        }
         imagePaletteToTrueColor($img);
         imageSaveAlpha($img, true);
         imageAlphaBlending($img, true);

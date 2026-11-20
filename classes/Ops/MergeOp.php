@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OpenMapsight\TileProxy\Ops;
 
 use Exception;
+use OpenMapsight\TileProxy\Log;
 use OpenMapsight\TileProxy\PipelineRunner;
 use OpenMapsight\TileProxy\Result;
 use OpenMapsight\TileProxy\Utils;
@@ -38,6 +39,13 @@ class MergeOp implements OpHandler
         );
 
         if ($subRes->failure !== null) {
+            // The layer is left out of this tile; let browsers retry it soon.
+            Log::warning('Merge source failed', [
+                'cacheServerName' => $cfg['cacheServerName'] ?? null,
+                'error' => $subRes->failure->getMessage(),
+            ]);
+            $res->cacheBrowserTtl = min($res->cacheBrowserTtl, $cfg['cacheBrowserTtlFail'] ?? 300);
+
             return $next($res);
         }
 

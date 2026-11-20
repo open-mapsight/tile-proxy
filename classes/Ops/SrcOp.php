@@ -3,13 +3,18 @@ declare(strict_types=1);
 
 namespace OpenMapsight\TileProxy\Ops;
 
+use OpenMapsight\TileProxy\Log;
 use OpenMapsight\TileProxy\Result;
 use OpenMapsight\TileProxy\UpstreamFetcher;
+use OpenMapsight\TileProxy\Utils;
 use OpenMapsight\TileProxy\WmsUrl;
 use RuntimeException;
 
 class SrcOp implements OpHandler
 {
+    /** Client errors that are retried like server errors: timeout, too early, rate limited. */
+    private const TEMPORARY_CLIENT_ERRORS = [408, 425, 429];
+
     public function __invoke(callable $next, array $cfg, Result $res): Result
     {
         $res->mimeType = $cfg['mimeType'];
@@ -28,8 +33,8 @@ class SrcOp implements OpHandler
                 $res->getMetadata()->getLast5xx() !== null
                 && time() - ($cfg['cacheServer5xxTtl'] ?? 300) < $res->getMetadata()->getLast5xx()
             ) {
-                // last request failed & we're in the retry cooldown window
-                $res->cacheBrowserTtl = $cfg['cacheBrowserTtlFail'] ?? 300;
+                // last request failed temporarily & we're in the retry cooldown window
+                $res->cacheBrowserTtl = min($res->cacheBrowserTtl, $cfg['cacheBrowserTtlFail'] ?? 300);
                 return false;
             }
 
@@ -56,17 +61,26 @@ class SrcOp implements OpHandler
                 $mimeType
             );
 
-            if (!$fetchResult->isSuccess()) {
-                $httpResCode = $fetchResult->statusCode;
+            $body = $fetchResult->isSuccess() ? $fetchResult->body : null;
+            if ($body !== null && Utils::isImageMimeType($mimeType) && !Utils::isDecodableImage($body)) {
+                Log::warning('Upstream image could not be decoded', ['url' => $url, 'mimeType' => $mimeType]);
+                $body = null;
+            }
 
-                if ($httpResCode !== null && 400 <= $httpResCode && $httpResCode <= 499) {
-                    $res->getMetadata()->setLast4xx(time());
-                } else if ($httpResCode !== null && 500 <= $httpResCode && $httpResCode <= 599) {
-                    $res->getMetadata()->setLast5xx(time());
-                    $res->cacheBrowserTtl = $cfg['cacheBrowserTtlFail'] ?? 300;
-                }
+            $httpResCode = $fetchResult->statusCode;
+            if ($body !== null) {
+                $res->setData($body);
+            } else if (
+                $httpResCode !== null && 400 <= $httpResCode && $httpResCode <= 499
+                && !in_array($httpResCode, self::TEMPORARY_CLIENT_ERRORS, true)
+            ) {
+                $res->getMetadata()->setLast4xx(time());
             } else {
-                $res->setData($fetchResult->body);
+                // Temporary failure: 5xx, 408/425/429, transport error or timeout, unexpected
+                // content type, empty or undecodable body. A stale cached copy is still served;
+                // the source is retried after `cacheServer5xxTtl`.
+                $res->getMetadata()->setLast5xx(time());
+                $res->cacheBrowserTtl = min($res->cacheBrowserTtl, $cfg['cacheBrowserTtlFail'] ?? 300);
             }
         }
 

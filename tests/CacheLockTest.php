@@ -15,6 +15,7 @@ use RuntimeException;
 class CacheLockTest extends TestCase
 {
     private string $tempDir;
+    private string $tile;
     private array $savedGet;
     private array $workers = [];
 
@@ -25,8 +26,8 @@ class CacheLockTest extends TestCase
 
         $response = Base::handleTileRequest($this->config(4));
 
-        $this->assertSame('tile', $response->body);
-        $this->assertSame('tile', file_get_contents($this->tempDir . '/cache/0/0/0-source-0'));
+        $this->assertSame($this->tile, $response->body);
+        $this->assertSame($this->tile, file_get_contents($this->tempDir . '/cache/0/0/0-source-0'));
     }
 
     public function testConfiguredTimeoutIsBoundedAndClosesItsHandle(): void
@@ -188,7 +189,7 @@ class CacheLockTest extends TestCase
         unlink($this->tempDir . '/tile');
         clearstatcache();
 
-        $this->assertSame('tile', Base::handleTileRequest($this->config(0))->body);
+        $this->assertSame($this->tile, Base::handleTileRequest($this->config(0))->body);
         clearstatcache();
         $this->assertSame($oldTime, filemtime($tilePath));
         $this->assertGreaterThan($oldTime, filemtime($this->metadataPath()));
@@ -232,7 +233,12 @@ class CacheLockTest extends TestCase
     {
         $this->tempDir = sys_get_temp_dir() . '/tile_proxy_lock_' . bin2hex(random_bytes(8));
         mkdir($this->tempDir);
-        file_put_contents($this->tempDir . '/tile', 'tile');
+        // Image sources are validated before caching, so the fixture is a real PNG.
+        $img = imagecreatetruecolor(1, 1);
+        ob_start();
+        imagepng($img);
+        $this->tile = (string)ob_get_clean();
+        file_put_contents($this->tempDir . '/tile', $this->tile);
         $this->savedGet = $_GET;
         $_GET = ['z' => '0', 'x' => '0', 'y' => '0'];
     }
