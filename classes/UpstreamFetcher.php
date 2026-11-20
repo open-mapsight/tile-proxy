@@ -44,6 +44,10 @@ class UpstreamFetcher
             $statusCode = $response->getStatusCode();
 
             if (400 <= $statusCode) {
+                if (500 <= $statusCode) {
+                    self::logWarning('Upstream server error', ['url' => $url, 'statusCode' => $statusCode]);
+                }
+
                 return new UpstreamFetchResult(null, $statusCode, false);
             }
 
@@ -69,7 +73,12 @@ class UpstreamFetcher
                 );
             }
 
-            return new UpstreamFetchResult((string)$response->getBody(), $statusCode, false);
+            $body = (string)$response->getBody();
+            if ($body === '') {
+                self::logWarning('Upstream returned an empty body', ['url' => $url, 'statusCode' => $statusCode]);
+            }
+
+            return new UpstreamFetchResult($body, $statusCode, false);
         } catch (GuzzleException $e) {
             self::logWarning('Upstream fetch failed', [
                 'url' => $url,
@@ -153,6 +162,16 @@ class UpstreamFetcher
         }
 
         return $options;
+    }
+
+    /**
+     * Replace the shared HTTP client, for example with a mock handler in tests. `null` restores the default.
+     *
+     * @internal
+     */
+    public static function setHttpClient(?Client $client): void
+    {
+        self::$httpClient = $client;
     }
 
     private static function httpClient(): Client

@@ -9,11 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Document upstream failure handling and the `cacheServer4xxTtl`, `cacheServer5xxTtl` and `cacheBrowserTtlFail` options.
 - Per-style `webfonts: false`, per-family disabling, and per-face `false` entries to control proxy font downloads.
 
 ### Changed
 
+- Treat transport errors and timeouts, unexpected content types, empty bodies, undecodable images and HTTP 408, 425 and 429 like HTTP 5xx: retry after `cacheServer5xxTtl` and send the `cacheBrowserTtlFail` browser TTL. Previously these failures were retried on every request, and tiles missing a layer kept the full browser TTL.
+- Lower a merged tile's browser TTL to the merge's `cacheBrowserTtlFail` when its sub-pipeline fails, and log the failure.
+- Log HTTP 5xx responses and empty bodies from upstreams when logging is enabled.
 - Only generate local `ol:webfonts` metadata when the style configuration sets `olWebfonts: true`; otherwise preserve upstream font metadata and renderer behavior.
+
+### Fixed
+
+- Do not cache image responses that cannot be decoded. They were checkpointed before decoding and then failed every request for that tile with HTTP 500 until the server TTL expired.
+- Keep failure cooldowns recorded during a request that ends in an error.
 
 ## [2.7.0] - 2026-10-29
 

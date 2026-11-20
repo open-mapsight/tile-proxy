@@ -137,6 +137,24 @@ requests. HTTP(S) fetches go through Guzzle; `file://` URLs are read from disk. 
 For tile pipelines, set `upstreamHttp` at the root of the config. A `src` operation can override it with its own
 `upstreamHttp` block.
 
+### Upstream failures
+
+A raster `src` that cannot fetch a usable tile serves its stale cached copy if it has one, and otherwise
+nothing (a merge then leaves that layer out). Nothing from a failed fetch is cached. Failures are retried
+after a cooldown that is stored per tile and source:
+
+| Failure | Retry after | Browser TTL |
+| --- | --- | --- |
+| HTTP 4xx (except 408, 425, 429) | `cacheServer4xxTtl` (default 3600 s) | `cacheBrowserTtl` |
+| HTTP 5xx, 408, 425, 429, transport errors and timeouts, an unexpected content type, an empty body or bytes that are not a readable image | `cacheServer5xxTtl` (default 300 s) | `cacheBrowserTtlFail` (default 300 s) |
+
+`cacheServer5xxTtl` therefore covers every temporary failure, not only HTTP 5xx. A typical case is a WMS that
+answers HTTP 200 with an HTML maintenance page. Image sources must return a decodable image: the header has
+to be a known image format, and formats this GD build can read must also decode.
+
+A tile assembled without one of its layers is sent with the shorter failure TTL, so browsers ask again
+soon. A `merge` op accepts its own `cacheBrowserTtlFail` (default 300 s) for when its sub-pipeline throws.
+
 ### Raster cache retention
 
 `cacheServerTtl` controls freshness: an expired tile is refreshed on its next request, and a failed refresh can
@@ -179,7 +197,7 @@ Most failures are handled gracefully in HTTP responses, but are otherwise silent
 
 When `logErrors` is `true`, or a PSR-3 logger is wired via `Log::setLogger()`, the library logs:
 
-* **Warnings** for upstream transport failures (invalid proxy URI, timeouts, unreadable `file://` URLs, content-type mismatches)
+* **Warnings** for upstream failures: transport errors (invalid proxy URI, timeouts, unreadable `file://` URLs), HTTP 5xx responses, content-type mismatches, empty bodies, undecodable images, and merge sub-pipelines that fail
 * **Errors** for uncaught request handler failures that become HTTP 500 responses (cache write failures, missing extensions, pipeline misconfiguration)
 
 HTTP 4xx client errors and missing upstream tiles are not logged by default.

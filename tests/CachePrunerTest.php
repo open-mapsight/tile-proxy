@@ -87,6 +87,9 @@ class CachePrunerTest extends TestCase
         $metadata = $this->write('cache/1/0/0-.metadata', 120);
         $scannedTiles = $scanHadTile ? [$this->write('cache/1/0/0-old-source-0', 120)] : [];
         $source = $this->write('source');
+        // Image sources are validated before caching, so the source is a real PNG.
+        $img = imagecreatetruecolor(1, 1);
+        imagepng($img, $source);
         $metadataMtime = filemtime($metadata);
         $savedGet = $_GET;
         $_GET = ['z' => '1', 'x' => '0', 'y' => '0'];

@@ -54,6 +54,8 @@ class Base
             }
         }
 
+        $meta = null;
+        $metaSaved = false;
         try {
             $meta = new Metadata($metadataPath);
 
@@ -73,12 +75,20 @@ class Base
 
             $res->checkpointCache();
             Metadata::save($meta);
+            $metaSaved = true;
             if (!touch($metadataPath)) {
                 throw new RuntimeException('Could not update cache access time "' . $metadataPath . '"');
             }
 
             return static::buildTileResponse($res);
         } finally {
+            if ($meta !== null && !$metaSaved) {
+                // Keep failure cooldowns recorded before the request failed.
+                try {
+                    Metadata::save($meta);
+                } catch (\Throwable) {
+                }
+            }
             $lock?->release();
         }
     }

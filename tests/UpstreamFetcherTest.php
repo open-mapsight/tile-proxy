@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace OpenMapsight\TileProxy\Tests;
 
+use OpenMapsight\TileProxy\UpstreamFetchResult;
 use OpenMapsight\TileProxy\UpstreamFetcher;
 use PHPUnit\Framework\TestCase;
 
@@ -47,6 +48,12 @@ class UpstreamFetcherTest extends TestCase
         $result = UpstreamFetcher::fetch('file://' . $this->tempDir . '/missing.png');
 
         $this->assertFalse($result->isSuccess());
+    }
+
+    public function testEmptyBodyIsNotASuccess(): void
+    {
+        $this->assertFalse((new UpstreamFetchResult('', 200, false))->isSuccess());
+        $this->assertTrue((new UpstreamFetchResult('x', 200, false))->isSuccess());
     }
 
     public function testMatchesContentTypeIgnoresParameters(): void

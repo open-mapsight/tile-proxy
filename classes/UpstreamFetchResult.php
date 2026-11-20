@@ -19,6 +19,7 @@ class UpstreamFetchResult
     {
         return !$this->transportFailed
             && !$this->contentTypeMismatch
-            && $this->body !== null;
+            && $this->body !== null
+            && $this->body !== '';
     }
 }
