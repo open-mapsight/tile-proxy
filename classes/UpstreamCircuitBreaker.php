@@ -22,6 +22,19 @@ final class UpstreamCircuitBreaker
         $this->openTtl = self::positiveInt($config, 'openTtl', 30);
     }
 
+    public static function withHttpTimeout(string $url, array $httpConfig): array
+    {
+        if (in_array(strtolower((string)parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)) {
+            $timeout = $httpConfig['timeout'] ?? 30;
+            if (!is_numeric($timeout) || !is_finite((float)$timeout) || (float)$timeout <= 0) {
+                throw new InvalidArgumentException('upstreamHttp.timeout must be finite and positive with the circuit breaker');
+            }
+            $httpConfig['timeout'] = (float)$timeout;
+        }
+
+        return $httpConfig;
+    }
+
     /**
      * @param callable(): UpstreamFetchResult $fetch
      * @return UpstreamFetchResult|null Null means the circuit skipped this fetch.
@@ -38,11 +51,12 @@ final class UpstreamCircuitBreaker
         $key = hash('sha256', serialize([$scope, $origin]));
         $path = rtrim($this->cacheRoot, '/') . '/' . self::DIRECTORY . '/' . $key;
         $probe = null;
+        $reinitialized = false;
 
         try {
-            $lock = $this->lockState($path);
+            $lock = FileLock::acquireStable($path . '.lock');
             try {
-                $state = $this->readState($path);
+                $state = $this->readState($path, $reinitialized);
                 if ($state['openUntil'] > time()) {
                     return null;
                 }
@@ -54,6 +68,9 @@ final class UpstreamCircuitBreaker
                 }
             } finally {
                 $lock->release();
+                if ($reinitialized) {
+                    Log::warning('Upstream circuit state reinitialized', ['circuit' => $key]);
+                }
             }
         } catch (RuntimeException) {
             Log::warning('Upstream circuit state unavailable', ['circuit' => $key]);
@@ -78,17 +95,18 @@ final class UpstreamCircuitBreaker
         }
 
         $event = null;
+        $reinitialized = false;
         try {
-            $lock = $this->lockState($path);
+            $lock = FileLock::acquireStable($path . '.lock');
             try {
-                $state = $this->readState($path);
+                $state = $this->readState($path, $reinitialized);
                 if ($state['generation'] !== $generation) {
                     return;
                 }
 
                 $now = time();
                 if ($probe) {
-                    $state['openUntil'] = $temporary ? $now + $this->openTtl : 0;
+                    $state['openUntil'] = $temporary ? $now + min($this->openTtl, PHP_INT_MAX - $now) : 0;
                     $state['count'] = $state['windowStart'] = 0;
                     $event = $temporary ? 'Upstream circuit reopened' : 'Upstream circuit recovered';
                 } else {
@@ -97,7 +115,7 @@ final class UpstreamCircuitBreaker
                         $state['windowStart'] = $now;
                     }
                     if (++$state['count'] >= $this->threshold) {
-                        $state['openUntil'] = $now + $this->openTtl;
+                        $state['openUntil'] = $now + min($this->openTtl, PHP_INT_MAX - $now);
                         $event = 'Upstream circuit opened';
                     }
                 }
@@ -108,6 +126,9 @@ final class UpstreamCircuitBreaker
                 DiskCache::writeAtomically($path . '.json', json_encode($state, JSON_THROW_ON_ERROR));
             } finally {
                 $lock->release();
+                if ($reinitialized) {
+                    Log::warning('Upstream circuit state reinitialized', ['circuit' => $key]);
+                }
             }
         } catch (RuntimeException) {
             Log::warning('Upstream circuit state unavailable', ['circuit' => $key]);
@@ -119,27 +140,31 @@ final class UpstreamCircuitBreaker
         }
     }
 
-    private function lockState(string $path): FileLock
-    {
-        return FileLock::acquire($path . '.lock', 0.05)
-            ?? throw new RuntimeException('Timed out acquiring upstream circuit state lock');
-    }
-
     /** @return array{generation: string, count: int, windowStart: int, openUntil: int} */
-    private function readState(string $path): array
+    private function readState(string $path, bool &$reinitialized): array
     {
-        $raw = DiskCache::read($path . '.json');
-        if ($raw === null && !is_file($path . '.json')) {
-            return ['generation' => '', 'count' => 0, 'windowStart' => 0, 'openUntil' => 0];
+        $statePath = $path . '.json';
+        $initial = ['generation' => '', 'count' => 0, 'windowStart' => 0, 'openUntil' => 0];
+        $raw = DiskCache::read($statePath);
+        if ($raw === null) {
+            clearstatcache(true, $statePath);
+            if (@lstat($statePath) !== false) {
+                throw new RuntimeException('Could not read upstream circuit state');
+            }
+
+            return $initial;
         }
 
-        $state = $raw === null ? null : json_decode($raw, true);
+        $state = json_decode($raw, true);
         if (!is_string($state['generation'] ?? null)
-            || !is_int($state['count'] ?? null)
-            || !is_int($state['windowStart'] ?? null)
-            || !is_int($state['openUntil'] ?? null)
+            || !is_int($state['count'] ?? null) || $state['count'] < 0
+            || !is_int($state['windowStart'] ?? null) || $state['windowStart'] < 0
+            || !is_int($state['openUntil'] ?? null) || $state['openUntil'] < 0
         ) {
-            throw new RuntimeException('Invalid upstream circuit state');
+            $initial['generation'] = bin2hex(random_bytes(16));
+            DiskCache::writeAtomically($statePath, json_encode($initial, JSON_THROW_ON_ERROR));
+            $reinitialized = true;
+            return $initial;
         }
 
         return $state;

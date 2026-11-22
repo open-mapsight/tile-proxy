@@ -38,16 +38,22 @@ class DiskCache
     {
         $directory = dirname($path);
         Utils::mkdirp($directory);
-        $temp = @tempnam($directory, '.write-');
-        if ($temp === false) {
+        $temp = $directory . '/.write-' . bin2hex(random_bytes(16));
+        $stream = @fopen($temp, 'xb');
+        if ($stream === false) {
             throw new RuntimeException('Could not create temporary cache file in "' . $directory . '"');
         }
 
         try {
-            if (@file_put_contents($temp, $data) !== strlen($data) || !@rename($temp, $path)) {
+            $written = @fwrite($stream, $data);
+            $closed = @fclose($stream);
+            if ($written !== strlen($data) || !$closed || !@rename($temp, $path)) {
                 throw new RuntimeException('Could not replace cache file "' . $path . '"');
             }
         } finally {
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
             if (is_file($temp)) {
                 @unlink($temp);
             }

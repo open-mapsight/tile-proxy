@@ -10,8 +10,14 @@ class Metadata
 
     public function __construct(
         private readonly ?string $filepath,
-        public readonly ?string $cacheRoot = null,
+        private readonly ?string $cacheRoot = null,
     ) {
+    }
+
+    /** @internal */
+    public function getCacheRoot(): ?string
+    {
+        return $this->cacheRoot;
     }
 
     public static function save(self $self): void

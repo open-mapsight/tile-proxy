@@ -206,6 +206,21 @@ class CachePrunerTest extends TestCase
         $this->assertDirectoryExists($emptyDirectory);
     }
 
+    public function testPrunesExistingRasterPrefixWithoutRemovingCircuitFiles(): void
+    {
+        $prefix = '.upstream-circuits';
+        $state = $this->write($prefix . '/' . str_repeat('1', 64) . '.json', 120);
+        $lock = $this->write($prefix . '/' . str_repeat('1', 64) . '.lock', 120);
+        $tile = $this->write($prefix . '/1/0/0-src-0', 120);
+        $metadata = $this->write($prefix . '/1/0/0-.metadata', 120);
+
+        self::assertSame(2, CachePruner::prune($this->tempDir, 60));
+        self::assertFileExists($state);
+        self::assertFileExists($lock);
+        self::assertFileDoesNotExist($tile);
+        self::assertFileDoesNotExist($metadata);
+    }
+
     public static function cacheRootSuffixes(): array
     {
         return [

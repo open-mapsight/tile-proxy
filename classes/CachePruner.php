@@ -45,7 +45,7 @@ final class CachePruner
         $files = new RecursiveIteratorIterator(
             new RecursiveCallbackFilterIterator(
                 $directories,
-                static fn (SplFileInfo $file): bool => !in_array($file->getPathname(), [$mapboxCachePath, $circuitPath], true)
+                static fn (SplFileInfo $file): bool => $file->getPathname() !== $mapboxCachePath
             ),
             RecursiveIteratorIterator::CHILD_FIRST,
             RecursiveIteratorIterator::CATCH_GET_CHILD
@@ -59,7 +59,9 @@ final class CachePruner
             if ($file->isDir()) {
                 $deleted += self::pruneDirectory($file->getPathname(), $cutoff);
                 // Non-empty directories and directories in use are left in place.
-                @rmdir($file->getPathname());
+                if ($file->getPathname() !== $circuitPath) {
+                    @rmdir($file->getPathname());
+                }
             }
         }
 

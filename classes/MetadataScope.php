@@ -17,7 +17,7 @@ class MetadataScope
     /** @internal */
     public function getCacheRoot(): ?string
     {
-        return $this->getRootMetadata()->cacheRoot;
+        return $this->getRootMetadata()->getCacheRoot();
     }
 
     private function getRootMetadata(): Metadata

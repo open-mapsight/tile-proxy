@@ -64,8 +64,13 @@ class SrcOp implements OpHandler
 
         if ($invalidateCache) {
             $url = $this->getSrcUrl($cfg, $res);
-            $fetch = fn () => $this->fetchTile($url, $cfg);
-            if (isset($cfg['upstreamCircuitBreaker'])) {
+            $breakerEnabled = isset($cfg['upstreamCircuitBreaker']);
+            $httpConfig = $cfg['upstreamHttp'] ?? [];
+            if ($breakerEnabled) {
+                $httpConfig = UpstreamCircuitBreaker::withHttpTimeout($url, $httpConfig);
+            }
+            $fetch = fn () => $this->fetchTile($url, $cfg['mimeType'], $httpConfig);
+            if ($breakerEnabled) {
                 $cacheRoot = $res->getMetadata()->getCacheRoot()
                     ?? throw new RuntimeException('The upstream circuit breaker needs a cache root');
                 $breaker = new UpstreamCircuitBreaker($cacheRoot, $cfg['upstreamCircuitBreaker']);
@@ -108,10 +113,9 @@ class SrcOp implements OpHandler
         $res->cacheBrowserTtl = min($res->cacheBrowserTtl, $ttl);
     }
 
-    private function fetchTile(string $url, array $cfg): UpstreamFetchResult
+    private function fetchTile(string $url, ?string $mimeType, array $httpConfig): UpstreamFetchResult
     {
-        $mimeType = $cfg['mimeType'] ?? null;
-        $result = UpstreamFetcher::fetch($url, $cfg['upstreamHttp'] ?? [], $mimeType, $mimeType);
+        $result = UpstreamFetcher::fetch($url, $httpConfig, $mimeType, $mimeType);
         if ($result->isSuccess() && Utils::isImageMimeType($mimeType) && !Utils::isDecodableImage($result->body)) {
             Log::warning('Upstream image could not be decoded', ['url' => $url, 'mimeType' => $mimeType]);
             return new UpstreamFetchResult(null, $result->statusCode, false, error: 'undecodable image');

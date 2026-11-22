@@ -117,6 +117,7 @@ class UpstreamFailureTest extends TestCase
             $_GET['y'] = '1';
             self::assertTrue(Base::handleTileRequest($cfg)->isNotFound());
             self::assertCount(1, $this->history);
+            self::assertSame(30.0, $this->history[0]['options']['timeout']);
             self::assertStringNotContainsString('last5xx', file_get_contents($root . '/1/0/1-.metadata'));
 
             $paths = glob($root . '/.upstream-circuits/*.json');
