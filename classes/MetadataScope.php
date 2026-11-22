@@ -14,6 +14,12 @@ class MetadataScope
         Metadata::save($self->getRootMetadata());
     }
 
+    /** @internal */
+    public function getCacheRoot(): ?string
+    {
+        return $this->getRootMetadata()->cacheRoot;
+    }
+
     private function getRootMetadata(): Metadata
     {
         $ref = $this->ref;

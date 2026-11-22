@@ -57,7 +57,7 @@ class Base
         $meta = null;
         $metaSaved = false;
         try {
-            $meta = new Metadata($metadataPath);
+            $meta = new Metadata($metadataPath, $cfg['cacheServerPath'] ?? null);
 
             /** @var Result $res */
             $res = call_user_func(

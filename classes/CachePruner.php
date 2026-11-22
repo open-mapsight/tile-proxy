@@ -31,6 +31,7 @@ final class CachePruner
         $deleted = 0;
         // Mapbox asset writers do not share raster tile locks, even in the same cache root.
         $mapboxCachePath = $cacheServerPath . 'mapbox-style-proxy';
+        $circuitPath = $cacheServerPath . UpstreamCircuitBreaker::DIRECTORY;
         $directories = self::openDirectory(
             $cacheServerPath,
             static fn (): RecursiveDirectoryIterator => new RecursiveDirectoryIterator(
@@ -44,7 +45,7 @@ final class CachePruner
         $files = new RecursiveIteratorIterator(
             new RecursiveCallbackFilterIterator(
                 $directories,
-                static fn (SplFileInfo $file): bool => $file->getPathname() !== $mapboxCachePath
+                static fn (SplFileInfo $file): bool => !in_array($file->getPathname(), [$mapboxCachePath, $circuitPath], true)
             ),
             RecursiveIteratorIterator::CHILD_FIRST,
             RecursiveIteratorIterator::CATCH_GET_CHILD

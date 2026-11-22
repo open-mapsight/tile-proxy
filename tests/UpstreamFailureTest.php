@@ -101,6 +101,35 @@ class UpstreamFailureTest extends TestCase
         $this->assertLessThanOrEqual(time() - 7200, filemtime($cached[0]), 'The stale copy keeps its age');
     }
 
+    public function testCircuitSkipsOtherRasterTilesWithoutRecordingTheirCooldown(): void
+    {
+        $src = $this->httpSrc('src');
+        $src['upstreamCircuitBreaker'] = ['failureThreshold' => 1];
+        $root = $this->tempDir . '/base-cache';
+        $cfg = ['cacheServerPath' => $root, 'ops' => [$src]];
+        $savedGet = $_GET;
+        try {
+            $_GET = ['z' => '1', 'x' => '0', 'y' => '0'];
+            $this->useUpstream([new Response(200, ['Content-Type' => 'image/png'], 'broken image')]);
+            self::assertTrue(Base::handleTileRequest($cfg)->isNotFound());
+
+            $_GET['y'] = '1';
+            self::assertTrue(Base::handleTileRequest($cfg)->isNotFound());
+            self::assertCount(1, $this->history);
+            self::assertStringNotContainsString('last5xx', file_get_contents($root . '/1/0/1-.metadata'));
+
+            $paths = glob($root . '/.upstream-circuits/*.json');
+            self::assertCount(1, $paths);
+            $state = json_decode(file_get_contents($paths[0]), true, flags: JSON_THROW_ON_ERROR);
+            $state['openUntil'] = time() - 1;
+            file_put_contents($paths[0], json_encode($state, JSON_THROW_ON_ERROR));
+            $this->useUpstream([$this->pngResponse()]);
+            self::assertSame($this->png, Base::handleTileRequest($cfg)->body);
+        } finally {
+            $_GET = $savedGet;
+        }
+    }
+
     public function testMergeCarriesTheOverlayFailureTtl(): void
     {
         $this->useUpstream([new Response(200, ['Content-Type' => 'text/html'], 'maintenance')]);

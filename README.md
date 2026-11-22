@@ -155,6 +155,25 @@ to be a known image format, and formats this GD build can read must also decode.
 A tile assembled without one of its layers is sent with the shorter failure TTL, so browsers ask again
 soon. A `merge` op accepts its own `cacheBrowserTtlFail` (default 300 s) for when its sub-pipeline throws.
 
+#### Circuit breaker
+
+Set `"upstreamCircuitBreaker": {}` on a raster source to skip requests across cold tiles when its upstream
+is failing. The object accepts three positive integer settings: `failureThreshold` (default 5),
+`failureWindow` (default 30 seconds), and `openTtl` (default 30 seconds). The window starts at the first
+temporary failure and counts failures even if other requests succeed during it. Permanent 4xx responses
+do not count. An open circuit follows the temporary-failure fallback without starting a per-tile cooldown
+for a skipped fetch. Fresh cache hits are unaffected.
+
+The breaker groups requests by source cache name and requested HTTP(S) origin, including scheme and port.
+Different mirror origins have separate circuits. Requests still select one mirror at a time. After the
+open period, one worker probes upstream. A temporary failure reopens the circuit. A usable response or a
+permanent 4xx closes it. Configure a finite `upstreamHttp.timeout` to bound probe duration.
+
+State lives in the reserved `.upstream-circuits` directory under `cacheServerPath`. Workers sharing it
+need the same filesystem, access as the same user, and working `flock()`. If circuit storage fails,
+upstream fetches continue and a warning is emitted through the configured logger. The logger also warns
+when the circuit opens, reopens, or recovers. Skipped requests do not each generate a warning.
+
 ### Raster cache retention
 
 `cacheServerTtl` controls freshness: an expired tile is refreshed on its next request, and a failed refresh can

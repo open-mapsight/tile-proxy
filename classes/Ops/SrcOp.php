@@ -5,16 +5,15 @@ namespace OpenMapsight\TileProxy\Ops;
 
 use OpenMapsight\TileProxy\Log;
 use OpenMapsight\TileProxy\Result;
+use OpenMapsight\TileProxy\UpstreamCircuitBreaker;
 use OpenMapsight\TileProxy\UpstreamFetcher;
+use OpenMapsight\TileProxy\UpstreamFetchResult;
 use OpenMapsight\TileProxy\Utils;
 use OpenMapsight\TileProxy\WmsUrl;
 use RuntimeException;
 
 class SrcOp implements OpHandler
 {
-    /** Client errors that are retried like server errors: timeout, too early, rate limited. */
-    private const TEMPORARY_CLIENT_ERRORS = [408, 425, 429];
-
     public function __invoke(callable $next, array $cfg, Result $res): Result
     {
         $res->mimeType = $cfg['mimeType'];
@@ -53,38 +52,44 @@ class SrcOp implements OpHandler
 
         if ($invalidateCache) {
             $url = $this->getSrcUrl($cfg, $res);
-            $mimeType = $cfg['mimeType'] ?? null;
-            $fetchResult = UpstreamFetcher::fetch(
-                $url,
-                $cfg['upstreamHttp'] ?? [],
-                $mimeType,
-                $mimeType
-            );
-
-            $body = $fetchResult->isSuccess() ? $fetchResult->body : null;
-            if ($body !== null && Utils::isImageMimeType($mimeType) && !Utils::isDecodableImage($body)) {
-                Log::warning('Upstream image could not be decoded', ['url' => $url, 'mimeType' => $mimeType]);
-                $body = null;
+            $fetch = fn () => $this->fetchTile($url, $cfg);
+            if (isset($cfg['upstreamCircuitBreaker'])) {
+                $cacheRoot = $res->getMetadata()->getCacheRoot()
+                    ?? throw new RuntimeException('The upstream circuit breaker needs a cache root');
+                $breaker = new UpstreamCircuitBreaker($cacheRoot, $cfg['upstreamCircuitBreaker']);
+                $fetchResult = $breaker->fetch('raster:' . $cfg['cacheServerName'], $url, $fetch);
+            } else {
+                $fetchResult = $fetch();
             }
 
-            $httpResCode = $fetchResult->statusCode;
-            if ($body !== null) {
-                $res->setData($body);
-            } else if (
-                $httpResCode !== null && 400 <= $httpResCode && $httpResCode <= 499
-                && !in_array($httpResCode, self::TEMPORARY_CLIENT_ERRORS, true)
-            ) {
+            if ($fetchResult?->isSuccess()) {
+                $res->setData($fetchResult->body);
+            } elseif ($fetchResult?->isPermanentClientError()) {
                 $res->getMetadata()->setLast4xx(time());
             } else {
                 // Temporary failure: 5xx, 408/425/429, transport error or timeout, unexpected
                 // content type, empty or undecodable body. A stale cached copy is still served;
                 // the source is retried after `cacheServer5xxTtl`.
-                $res->getMetadata()->setLast5xx(time());
+                if ($fetchResult !== null) {
+                    $res->getMetadata()->setLast5xx(time());
+                }
                 $res->cacheBrowserTtl = min($res->cacheBrowserTtl, $cfg['cacheBrowserTtlFail'] ?? 300);
             }
         }
 
         return $next($res);
+    }
+
+    private function fetchTile(string $url, array $cfg): UpstreamFetchResult
+    {
+        $mimeType = $cfg['mimeType'] ?? null;
+        $result = UpstreamFetcher::fetch($url, $cfg['upstreamHttp'] ?? [], $mimeType, $mimeType);
+        if ($result->isSuccess() && Utils::isImageMimeType($mimeType) && !Utils::isDecodableImage($result->body)) {
+            Log::warning('Upstream image could not be decoded', ['url' => $url, 'mimeType' => $mimeType]);
+            return new UpstreamFetchResult(null, $result->statusCode, false, error: 'undecodable image');
+        }
+
+        return $result;
     }
 
     protected function getSrcUrl(array $cfg, Result $res): string

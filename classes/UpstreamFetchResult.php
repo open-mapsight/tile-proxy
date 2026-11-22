@@ -22,4 +22,12 @@ class UpstreamFetchResult
             && $this->body !== null
             && $this->body !== '';
     }
+
+    public function isPermanentClientError(): bool
+    {
+        return $this->statusCode !== null
+            && $this->statusCode >= 400
+            && $this->statusCode <= 499
+            && !in_array($this->statusCode, [408, 425, 429], true);
+    }
 }
