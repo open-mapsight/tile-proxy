@@ -19,13 +19,14 @@ if ($path === '/legacy') {
 
 UpstreamFetcher::setHttpClient(new Client([
     'handler' => static fn (RequestInterface $request) => Create::promiseFor(new Response(
-        str_ends_with($request->getUri()->getPath(), '.pbf') ? 404 : 503
+        $path === '/huge-404' || str_ends_with($request->getUri()->getPath(), '.pbf') ? 404 : 503
     )),
     'http_errors' => false,
 ]));
 $cacheRoot = $_SERVER['DOCUMENT_ROOT'] . '/cache';
 $config = [
     'cacheServerPath' => $cacheRoot,
+    'cacheLockTimeout' => 0,
     'mapAssetBasePath' => '/map-assets',
     'ops' => [[
         'cacheServerName' => 'raster',
@@ -36,6 +37,9 @@ $config = [
         'upstreamCircuitBreaker' => ['failureThreshold' => 1],
     ]],
 ];
+if ($path === '/huge-404') {
+    $config['ops'][0]['cacheBrowser404Ttl'] = PHP_INT_MAX;
+}
 
 $writeCache = static function (
     string $style, string $type, string $url, array $body, int $age
@@ -51,15 +55,15 @@ $writeCache = static function (
     }
 };
 
-foreach (['direct', 'indirect', 'zero', 'cold'] as $style) {
+foreach (['direct', 'indirect', 'zero', 'cold', 'collision'] as $style) {
     $origin = 'https://tiles.test/' . $style . '/';
     $config['styles'][$style] = [
         'upstreamStyleUrl' => $origin . 'style.json',
         'allowedHosts' => ['tiles.test'],
         'allowedPathPrefixes' => ['/' . $style . '/'],
         'cacheServer404Ttl' => 3600,
-        'cacheBrowser404Ttl' => 3600,
-        'upstreamFailureCache' => ['cacheBrowserTtlFail' => $style === 'zero' ? 0 : 7],
+        'cacheBrowser404Ttl' => $style === 'collision' ? 0 : 3600,
+        'upstreamFailureCache' => $style === 'collision' ? [] : ['cacheBrowserTtlFail' => $style === 'zero' ? 0 : 7],
     ];
     if ($style === 'cold') {
         continue;
@@ -71,7 +75,7 @@ foreach (['direct', 'indirect', 'zero', 'cold'] as $style) {
         'version' => 8,
         'sources' => ['source' => ['type' => 'vector'] + $source],
         'layers' => [],
-    ], $style === 'indirect' ? 0 : 90000);
+    ], in_array($style, ['indirect', 'collision'], true) ? 0 : 90000);
     if ($style === 'indirect') {
         $writeCache($style, 'tilejson', $origin . 'tilejson.json', ['tiles' => $tiles], 90000);
     }

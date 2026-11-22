@@ -191,7 +191,9 @@ integer seconds. When the policy is enabled, each omitted setting defaults to ze
   For a missing tile, a positive value sends `Cache-Control: public, max-age=...` and `Expires`.
   Zero sends `Cache-Control: no-store` on the missing response. When the server TTL is positive, the browser
   TTL is capped by the remaining server cooldown. A vector 404 also respects the TTL cap of any stale
-  style or TileJSON it used.
+  style or TileJSON it used. If a refresh lock is busy, the proxy uses any active 404 cooldown and
+  otherwise sends stale tile bytes with `max-age=0` when the 404 policy applies. The HTTP sender
+  caps very large browser TTLs to the latest representable HTTP date.
 
 Stale tile bytes can still be served and retain their age. Missing responses have no Last-Modified header
 and cannot produce a 304. Raster errors other than an upstream 404 use their usual cooldowns and send

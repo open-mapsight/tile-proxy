@@ -7,6 +7,8 @@ use Throwable;
 
 class HttpResponse
 {
+    private const LAST_HTTP_DATE_TIMESTAMP = 253402300799; // 9999-12-31 23:59:59 UTC
+
     public function __construct(
         public readonly ?string $body,
         public readonly ?string $mimeType,
@@ -93,7 +95,10 @@ class HttpResponse
         if ($ttl === 0 && $noStoreAtZero) {
             header('Cache-Control: no-store');
         } elseif ($ttl !== null) {
-            header('Expires: ' . gmdate('D, d M Y H:i:s', time() + $ttl) . ' GMT');
+            $now = time();
+            $latest = min(PHP_INT_MAX, self::LAST_HTTP_DATE_TIMESTAMP);
+            $ttl = min($ttl, $latest - $now);
+            header('Expires: ' . gmdate('D, d M Y H:i:s', $now + $ttl) . ' GMT');
             header('Cache-Control: public, max-age=' . $ttl);
         }
     }

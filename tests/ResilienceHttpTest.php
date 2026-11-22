@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace OpenMapsight\TileProxy\Tests;
 
+use OpenMapsight\TileProxy\FileLock;
 use PHPUnit\Framework\TestCase;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
@@ -90,6 +91,41 @@ class ResilienceHttpTest extends TestCase
             self::assertGreaterThan(0, (int)$headers['retry-after']);
             self::assertLessThanOrEqual(300, (int)$headers['retry-after']);
         }
+    }
+
+    public function testStaleTileKeepsItsExplicitZeroTtlWhenRefreshLockIsBusy(): void
+    {
+        $style = 'collision';
+        $upstream = 'https://tiles.test/collision/tile/1/0/0.pbf';
+        $root = $this->tempDir . '/cache/mapbox-style-proxy';
+        $tileCache = $root . '/' . $style . '/tile/' . sha1($upstream);
+        mkdir(dirname($tileCache), 0777, true);
+        file_put_contents($tileCache, 'stale vector bytes');
+        touch($tileCache, time() - 700000);
+        $path = '/map-assets/tiles/collision/source/0/1/0/0.pbf';
+        self::assertSame('public, max-age=0', $this->request($path, 200)['cache-control'] ?? null);
+        self::assertFileExists($tileCache . '.failure.json');
+
+        $hash = hash('sha256', serialize([$style, 'tile', $upstream]));
+        $lock = FileLock::acquire($root . '/.locks/' . substr($hash, 0, 2) . '.lock', 0);
+        self::assertNotNull($lock);
+        try {
+            self::assertSame('public, max-age=0', $this->request($path, 200)['cache-control'] ?? null);
+            unlink($tileCache . '.failure.json');
+            self::assertSame('public, max-age=0', $this->request($path, 200)['cache-control'] ?? null);
+            unlink($tileCache);
+            self::assertSame('no-store', $this->request($path, 503)['cache-control'] ?? null);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    public function testLargestConfigured404TtlProducesARepresentableHttpDate(): void
+    {
+        $headers = $this->request('/huge-404?z=1&x=0&y=0', 404);
+        self::assertMatchesRegularExpression('/^public, max-age=[1-9][0-9]*$/', $headers['cache-control']);
+        self::assertMatchesRegularExpression('/ [0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2} GMT$/', $headers['expires']);
+        self::assertGreaterThan(time(), strtotime($headers['expires']));
     }
 
     private function request(string $path, int $status): array

@@ -565,10 +565,6 @@ class MapboxStyleProxy
             Log::warning('Could not lock Mapbox asset cache', ['resourceType' => $resourceType]);
             $lock = null;
         }
-        if ($lock === null) {
-            return $this->serveFailedAsset($cachePath, $validationError, temporaryTtl: $failureBrowserTtl);
-        }
-
         try {
             $cached = DiskCache::readFresh($cachePath, $cacheTtl);
             if ($cached !== null && $validationError($cached) === null) {
@@ -590,6 +586,13 @@ class MapboxStyleProxy
                         $kind === 'temporary' ? $remaining : null,
                     );
                 }
+            }
+
+            if ($lock === null) {
+                // The current refresh may still record a 404. Avoid extending the stale tile's TTL
+                // when the 404 policy applies and we could not read an active cooldown.
+                $ttl = $notFound === null ? $failureBrowserTtl : 0;
+                return $this->serveFailedAsset($cachePath, $validationError, temporaryTtl: $ttl);
             }
 
             $result = $breaker === null ? $fetch() : $breaker->fetch('mapbox:' . $styleName, $upstreamUrl, $fetch);
@@ -628,7 +631,7 @@ class MapboxStyleProxy
                 $kind === 'temporary' && $savedCooldown ? max(0, $cooldowns[$kind] - max(0, time() - $now)) : null,
             );
         } finally {
-            $lock->release();
+            $lock?->release();
         }
     }
 
