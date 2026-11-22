@@ -3,7 +3,14 @@ declare(strict_types=1);
 
 namespace OpenMapsight\TileProxy\Tests;
 
+use GuzzleHttp\Client;
+use GuzzleHttp\Handler\CurlHandler;
+use GuzzleHttp\Handler\StreamHandler;
+use GuzzleHttp\HandlerStack;
 use OpenMapsight\TileProxy\FileLock;
+use OpenMapsight\TileProxy\UpstreamCircuitBreaker;
+use OpenMapsight\TileProxy\UpstreamFetcher;
+use OpenMapsight\TileProxy\UpstreamFetchResult;
 use PHPUnit\Framework\TestCase;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
@@ -126,6 +133,59 @@ class ResilienceHttpTest extends TestCase
         self::assertMatchesRegularExpression('/^public, max-age=[1-9][0-9]*$/', $headers['cache-control']);
         self::assertMatchesRegularExpression('/ [0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2} GMT$/', $headers['expires']);
         self::assertGreaterThan(time(), strtotime($headers['expires']));
+    }
+
+    public function testCurlProbeTimeoutAppliesToEachRedirectTransfer(): void
+    {
+        if (!extension_loaded('curl')) {
+            self::markTestSkipped('The cURL extension is needed for the cURL transport check.');
+        }
+        $started = hrtime(true);
+        $result = $this->runProbe('/timeout-hop/3', new CurlHandler());
+        self::assertSame('response', $result->body);
+        self::assertGreaterThan(0.4, (hrtime(true) - $started) / 1e9);
+    }
+
+    public function testCurlProbeStillTimesOutOnOneStalledTransfer(): void
+    {
+        if (!extension_loaded('curl')) {
+            self::markTestSkipped('The cURL extension is needed for the cURL transport check.');
+        }
+        $result = $this->runProbe('/timeout-stall', new CurlHandler());
+        self::assertTrue($result->transportFailed);
+    }
+
+    public function testStreamProbeCanReadATricklingBodyBeyondTheTransportTimeout(): void
+    {
+        $started = hrtime(true);
+        $result = $this->runProbe('/timeout-drip', new StreamHandler());
+        self::assertSame('xxxxxxx', $result->body);
+        self::assertGreaterThan(0.4, (hrtime(true) - $started) / 1e9);
+    }
+
+    private function runProbe(string $path, callable $handler): UpstreamFetchResult
+    {
+        $url = $this->baseUrl . $path;
+        $breaker = new UpstreamCircuitBreaker($this->tempDir, ['failureThreshold' => 1]);
+        $breaker->fetch('probe', $url, static fn () => new UpstreamFetchResult(null, 503, false));
+        [$statePath] = glob($this->tempDir . '/.upstream-circuits/*.json');
+        $state = json_decode(file_get_contents($statePath), true, flags: JSON_THROW_ON_ERROR);
+        $state['openUntil'] = time() - 1;
+        file_put_contents($statePath, json_encode($state, JSON_THROW_ON_ERROR));
+
+        UpstreamFetcher::setHttpClient(new Client([
+            'handler' => HandlerStack::create($handler),
+            'http_errors' => false,
+            'proxy' => '',
+        ]));
+        try {
+            $http = UpstreamCircuitBreaker::withHttpTimeout($url, ['timeout' => 0.4]);
+            $result = $breaker->fetch('probe', $url, static fn () => UpstreamFetcher::fetch($url, $http));
+            self::assertNotNull($result);
+            return $result;
+        } finally {
+            UpstreamFetcher::setHttpClient(null);
+        }
     }
 
     private function request(string $path, int $status): array

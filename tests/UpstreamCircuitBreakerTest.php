@@ -3,9 +3,11 @@ declare(strict_types=1);
 
 namespace OpenMapsight\TileProxy\Tests;
 
+use InvalidArgumentException;
 use OpenMapsight\TileProxy\FileLock;
 use OpenMapsight\TileProxy\UpstreamCircuitBreaker;
 use OpenMapsight\TileProxy\UpstreamFetchResult;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 class UpstreamCircuitBreakerTest extends TestCase
@@ -140,6 +142,28 @@ class UpstreamCircuitBreakerTest extends TestCase
         $breaker->fetch('src', self::FIRST_TILE, self::failTemporarily(...));
         self::assertNull($breaker->fetch('src', self::OTHER_TILE, self::unexpectedFetch(...)));
         self::assertSame(1, json_decode(file_get_contents($path), true, flags: JSON_THROW_ON_ERROR)['count']);
+    }
+
+    #[DataProvider('unusableHttpTimeouts')]
+    public function testBreakerRejectsSettingsWithoutAnEffectiveHttpTimeout(mixed $timeout): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        UpstreamCircuitBreaker::withHttpTimeout(self::FIRST_TILE, ['timeout' => $timeout]);
+    }
+
+    public static function unusableHttpTimeouts(): array
+    {
+        return [
+            'sub-millisecond' => [0.00025],
+            'null' => [null],
+            'zero' => [0],
+        ];
+    }
+
+    public function testBreakerHttpTimeoutDefaultsAndSupportsOneMillisecond(): void
+    {
+        self::assertSame(30.0, UpstreamCircuitBreaker::withHttpTimeout(self::FIRST_TILE, [])['timeout']);
+        self::assertSame(0.001, UpstreamCircuitBreaker::withHttpTimeout(self::FIRST_TILE, ['timeout' => 0.001])['timeout']);
     }
 
     private function startWorkers(string $mode): array

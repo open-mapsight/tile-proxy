@@ -12,6 +12,37 @@ use OpenMapsight\TileProxy\UpstreamFetcher;
 use Psr\Http\Message\RequestInterface;
 
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+if (preg_match('#^/timeout-hop/([0-3])$#', $path, $matches) === 1) {
+    usleep(160000);
+    if ($matches[1] !== '0') {
+        header('Location: /timeout-hop/' . ((int)$matches[1] - 1));
+        return;
+    }
+    header('Content-Type: text/plain');
+    echo 'response';
+    return;
+}
+if ($path === '/timeout-drip') {
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    header('Content-Type: text/plain');
+    header('Content-Length: 7');
+    echo 'x';
+    flush();
+    for ($chunk = 0; $chunk < 6; ++$chunk) {
+        usleep(100000);
+        echo 'x';
+        flush();
+    }
+    return;
+}
+if ($path === '/timeout-stall') {
+    usleep(900000);
+    echo 'response';
+    return;
+}
+
 if ($path === '/legacy') {
     HttpResponse::send(new HttpResponse(null, null, 75, null));
     return;

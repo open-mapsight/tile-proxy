@@ -25,9 +25,12 @@ final class UpstreamCircuitBreaker
     public static function withHttpTimeout(string $url, array $httpConfig): array
     {
         if (in_array(strtolower((string)parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)) {
-            $timeout = $httpConfig['timeout'] ?? 30;
-            if (!is_numeric($timeout) || !is_finite((float)$timeout) || (float)$timeout <= 0) {
-                throw new InvalidArgumentException('upstreamHttp.timeout must be finite and positive with the circuit breaker');
+            $timeout = array_key_exists('timeout', $httpConfig) ? $httpConfig['timeout'] : 30;
+            // cURL represents the transport timeout in whole milliseconds.
+            if (!is_numeric($timeout) || !is_finite((float)$timeout) || (float)$timeout < 0.001) {
+                throw new InvalidArgumentException(
+                    'upstreamHttp.timeout must be finite and at least 0.001 seconds with the circuit breaker'
+                );
             }
             $httpConfig['timeout'] = (float)$timeout;
         }

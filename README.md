@@ -170,8 +170,13 @@ keep their existing TTL.
 The breaker groups requests by source cache name and requested HTTP(S) origin, including scheme and port.
 Different mirror origins have separate circuits. Requests still select one mirror at a time. After the
 open period, one worker probes upstream. A temporary failure reopens the circuit. A usable response or a
-permanent 4xx closes it. With the breaker enabled, HTTP fetches need a finite, positive
-`upstreamHttp.timeout` and default to 30 seconds.
+permanent 4xx closes it. Breaker-enabled HTTP fetches default to a 30-second Guzzle transport timeout.
+An explicit `upstreamHttp.timeout` must be finite and at least 0.001 seconds.
+
+The timeout applies per transfer with cURL. Redirects can each use that budget. The PHP stream handler
+can continue reading as long as response bytes arrive within its I/O timeout. The probe holds its lock
+until the fetch and validation finish. The probe can therefore take longer than 30 seconds.
+Use cURL and set `upstreamHttp.allow_redirects` to `false` to limit a probe to one timed transfer.
 
 State lives in the reserved `.upstream-circuits` directory under `cacheServerPath`. Workers sharing it
 need synchronized clocks, compatible filesystem permissions, and working cross-worker `flock()` on the
