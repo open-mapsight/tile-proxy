@@ -557,6 +557,9 @@ class MapboxStyleProxyTest extends TestCase
 
         // A previously cached comment must not be served, even while its mtime is fresh.
         $this->writeCacheFixture($cachePath, $bad);
+        if (is_file($cachePath . '.failure.json')) {
+            unlink($cachePath . '.failure.json');
+        }
         $mock->append(new Response(200, ['Content-Type' => 'text/css'], $bad));
         if ($options === []) {
             $this->expectException(UserException::class);
@@ -564,6 +567,7 @@ class MapboxStyleProxyTest extends TestCase
             MapboxStyleProxy::handleRequest($this->cfg, $path);
         } else {
             self::assertSame(503, MapboxStyleProxy::handleRequest($this->cfg, $path)->statusCode);
+            self::assertCount(0, $mock, 'The proxy tried a refresh before returning the cold failure');
         }
     }
 
