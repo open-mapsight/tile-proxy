@@ -343,6 +343,130 @@ class MapboxStyleProxyTest extends TestCase
         MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/styles/city-default.json');
     }
 
+    public function testLockCreationFailureKeepsReadableStaleDataAndReturns503OnColdMiss(): void
+    {
+        $this->configureRemoteStyle(['upstreamFailureCache' => ['cacheBrowserTtlFail' => 7]]);
+        $this->cfg['cacheLockTimeout'] = 0;
+        $path = '/map-assets/styles/city-default.json';
+        $cachePath = $this->remoteStyleCachePath();
+        $this->mockUpstream([$this->remoteStyleResponse()]);
+        $this->writeCacheFixture($cachePath, (string)$this->remoteStyleResponse()->getBody(), 90000);
+
+        file_put_contents($this->cacheDir . '/mapbox-style-proxy/.locks', 'blocks lock directory creation');
+        $stale = MapboxStyleProxy::handleRequest($this->cfg, $path);
+        self::assertSame(7, $stale->cacheBrowserTtl);
+        self::assertStringContainsString('directTiles', $stale->body);
+
+        unlink($cachePath);
+        self::assertSame(503, MapboxStyleProxy::handleRequest($this->cfg, $path)->statusCode);
+    }
+
+    public function testCooldownWriteFailureKeepsStaleDataAndReturns503OnColdMiss(): void
+    {
+        $this->configureRemoteStyle(['upstreamFailureCache' => ['cacheBrowserTtlFail' => 7]]);
+        $path = '/map-assets/styles/city-default.json';
+        $cachePath = $this->remoteStyleCachePath();
+        $this->writeCacheFixture($cachePath, (string)$this->remoteStyleResponse()->getBody(), 90000);
+        mkdir($cachePath . '.failure.json');
+        $this->mockUpstream([new Response(503), new Response(503)]);
+
+        $stale = MapboxStyleProxy::handleRequest($this->cfg, $path);
+        self::assertSame(7, $stale->cacheBrowserTtl);
+        self::assertStringContainsString('directTiles', $stale->body);
+
+        unlink($cachePath);
+        self::assertSame(503, MapboxStyleProxy::handleRequest($this->cfg, $path)->statusCode);
+    }
+
+    public function testOpenCircuitUsesABoundedNumberOfLocksAcrossColdTiles(): void
+    {
+        $this->configureRemoteStyle(['upstreamCircuitBreaker' => ['failureThreshold' => 1]]);
+        $this->mockUpstream([$this->remoteStyleResponse(), new Response(503)]);
+
+        for ($tile = 0; $tile < 270; ++$tile) {
+            $response = MapboxStyleProxy::handleRequest(
+                $this->cfg,
+                "/map-assets/tiles/city-default/directTiles/0/9/0/$tile.pbf",
+            );
+            self::assertSame(503, $response->statusCode);
+        }
+
+        $root = $this->cacheDir . '/mapbox-style-proxy';
+        self::assertLessThanOrEqual(256, count(glob($root . '/.locks/*.lock')));
+        self::assertSame([], glob($root . '/city-default/tile/*'));
+    }
+
+    #[DataProvider('unusableStyleResponses')]
+    public function testUnusableStyleResponseDoesNotReplaceValidStaleStyle(int $status, string $body): void
+    {
+        $this->configureRemoteStyle(['upstreamFailureCache' => ['cacheBrowserTtlFail' => 7]]);
+        $cachePath = $this->remoteStyleCachePath();
+        $original = (string)$this->remoteStyleResponse()->getBody();
+        $this->writeCacheFixture($cachePath, $original, 90000);
+        $this->mockUpstream([new Response($status, ['Content-Type' => 'application/json'], $body)]);
+
+        $stale = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/styles/city-default.json');
+        self::assertSame(7, $stale->cacheBrowserTtl);
+        self::assertStringContainsString('directTiles', $stale->body);
+        self::assertSame($original, file_get_contents($cachePath));
+    }
+
+    public static function unusableStyleResponses(): array
+    {
+        return [
+            'error object' => [200, '{"error":"maintenance"}'],
+            'list' => [200, '[{"version":8,"sources":{},"layers":[]}]'],
+            'partial response' => [206, '{"version":8,"sources":{},"layers":[]}'],
+        ];
+    }
+
+    public function testExistingMalformedStyleCacheIsIgnoredEvenWhenFresh(): void
+    {
+        $this->configureRemoteStyle(['upstreamFailureCache' => []]);
+        $this->writeCacheFixture($this->remoteStyleCachePath(), '{');
+        $this->mockUpstream([new Response(503)]);
+
+        $response = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/styles/city-default.json');
+        self::assertSame(503, $response->statusCode);
+    }
+
+    public function testGifWithPngContentTypeDoesNotReplacePngSprite(): void
+    {
+        $this->configureRemoteStyle(['upstreamFailureCache' => ['cacheBrowserTtlFail' => 7]]);
+        $url = 'https://tiles.example.test/vector/sprite';
+        $encoded = rtrim(strtr(base64_encode($url), '+/', '-_'), '=');
+        $cachePath = $this->cacheDir . '/mapbox-style-proxy/city-default/sprite/' . sha1($url . '.png');
+        $image = imagecreatetruecolor(1, 1);
+        ob_start();
+        imagepng($image);
+        $png = ob_get_clean();
+        ob_start();
+        imagegif($image);
+        $gif = ob_get_clean();
+        $this->writeCacheFixture($cachePath, $png, 3000000);
+        $this->mockUpstream([new Response(200, ['Content-Type' => 'image/png'], $gif)]);
+
+        $stale = MapboxStyleProxy::handleRequest($this->cfg, "/map-assets/sprites/city-default/$encoded.png");
+        self::assertSame($png, $stale->body);
+        self::assertSame(7, $stale->cacheBrowserTtl);
+        self::assertSame($png, file_get_contents($cachePath));
+    }
+
+    private function remoteStyleCachePath(): string
+    {
+        return $this->cacheDir . '/mapbox-style-proxy/city-default/style/'
+            . sha1('https://tiles.example.test/vector/style.json');
+    }
+
+    private function writeCacheFixture(string $path, string $body, int $age = 0): void
+    {
+        if (!is_dir(dirname($path))) {
+            mkdir(dirname($path), 0777, true);
+        }
+        file_put_contents($path, $body);
+        touch($path, time() - $age);
+    }
+
     private function mockUpstream(array $responses): MockHandler
     {
         $mock = new MockHandler($responses);

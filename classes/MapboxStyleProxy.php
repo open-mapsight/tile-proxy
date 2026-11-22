@@ -4,8 +4,8 @@ declare(strict_types=1);
 namespace OpenMapsight\TileProxy;
 
 use InvalidArgumentException;
-use JsonException;
 use RuntimeException;
+use stdClass;
 
 class MapboxStyleProxy
 {
@@ -473,16 +473,19 @@ class MapboxStyleProxy
 
         $cachePath = self::getCachePath($cfg, $styleName, $resourceType, $upstreamUrl);
         $cacheTtl = self::getCacheTtl($styleCfg, $resourceType);
-        $cached = DiskCache::readFresh($cachePath, $cacheTtl);
-        if ($cached !== null) {
-            return $cached;
-        }
-
         $failureConfig = $styleCfg['upstreamFailureCache'] ?? null;
         $breakerConfig = $styleCfg['upstreamCircuitBreaker'] ?? null;
         $resilienceEnabled = $failureConfig !== null || $breakerConfig !== null;
         $notFound = $resourceType === 'tile' ? TileNotFoundPolicy::fromConfig($styleCfg) : null;
-        if (!$resilienceEnabled && $notFound === null) {
+        $validateAsset = $resilienceEnabled || $notFound !== null;
+        $cacheKind = self::cacheKind($resourceType, $upstreamUrl);
+
+        $cached = DiskCache::readFresh($cachePath, $cacheTtl);
+        if ($cached !== null && (!$validateAsset || self::isUsableAsset($cached, $cacheKind))) {
+            return $cached;
+        }
+
+        if (!$validateAsset) {
             $result = self::fetchAsset($cfg, $styleCfg, $resourceType, $upstreamUrl);
             if ($result->isSuccess()) {
                 DiskCache::write($cachePath, $result->body);
@@ -503,14 +506,22 @@ class MapboxStyleProxy
         ];
         $failureBrowserTtl = self::failureTtl($failureConfig, 'cacheBrowserTtlFail', 300);
         $breaker = $breakerConfig === null ? null : new UpstreamCircuitBreaker($cfg['cacheServerPath'], $breakerConfig);
-        $lock = FileLock::acquire($cachePath . '.lock', (float)($cfg['cacheLockTimeout'] ?? 2.85));
+        // A bounded pool avoids one permanent lock file for every requested tile.
+        $lockPath = rtrim($cfg['cacheServerPath'], '/') . '/mapbox-style-proxy/.locks/'
+            . substr(hash('sha256', serialize([$styleName, $resourceType, $upstreamUrl])), 0, 2) . '.lock';
+        try {
+            $lock = FileLock::acquire($lockPath, (float)($cfg['cacheLockTimeout'] ?? 2.85));
+        } catch (RuntimeException) {
+            Log::warning('Could not lock Mapbox asset cache', ['resourceType' => $resourceType]);
+            $lock = null;
+        }
         if ($lock === null) {
-            return $this->serveFailedAsset($cachePath, temporaryTtl: $failureBrowserTtl);
+            return $this->serveFailedAsset($cachePath, $cacheKind, temporaryTtl: $failureBrowserTtl);
         }
 
         try {
             $cached = DiskCache::readFresh($cachePath, $cacheTtl);
-            if ($cached !== null) {
+            if ($cached !== null && self::isUsableAsset($cached, $cacheKind)) {
                 return $cached;
             }
 
@@ -523,15 +534,19 @@ class MapboxStyleProxy
             ) {
                 return $this->serveFailedAsset(
                     $cachePath,
+                    $cacheKind,
                     $kind === 'temporary' ? $failureBrowserTtl : null,
                     $kind === 'notFound' ? $notFound?->browserTtl($at) : null,
                 );
             }
 
-            $fetch = static fn () => self::fetchAsset($cfg, $styleCfg, $resourceType, $upstreamUrl, $resilienceEnabled);
+            if ($breaker !== null) {
+                $cfg['upstreamHttp'] = UpstreamCircuitBreaker::withHttpTimeout($upstreamUrl, $cfg['upstreamHttp'] ?? []);
+            }
+            $fetch = static fn () => self::fetchAsset($cfg, $styleCfg, $resourceType, $upstreamUrl, $cacheKind);
             $result = $breaker === null ? $fetch() : $breaker->fetch('mapbox:' . $styleName, $upstreamUrl, $fetch);
             if ($result?->isSuccess()) {
-                DiskCache::writeAtomically($cachePath, $result->body);
+                self::writeCacheBestEffort($cachePath, $result->body, $resourceType);
                 if ($failure !== null) {
                     @unlink($failurePath);
                 }
@@ -546,7 +561,11 @@ class MapboxStyleProxy
             $now = time();
             if ($result !== null) {
                 if ($cooldowns[$kind] > 0) {
-                    DiskCache::writeAtomically($failurePath, json_encode(['kind' => $kind, 'at' => $now], JSON_THROW_ON_ERROR));
+                    self::writeCacheBestEffort(
+                        $failurePath,
+                        json_encode(['kind' => $kind, 'at' => $now], JSON_THROW_ON_ERROR),
+                        $resourceType,
+                    );
                 } elseif ($failure !== null) {
                     @unlink($failurePath);
                 }
@@ -554,6 +573,7 @@ class MapboxStyleProxy
 
             return $this->serveFailedAsset(
                 $cachePath,
+                $cacheKind,
                 $kind === 'temporary' && $resilienceEnabled ? $failureBrowserTtl : null,
                 $kind === 'notFound' ? $notFound?->browserTtl($now) : null,
             );
@@ -562,11 +582,11 @@ class MapboxStyleProxy
         }
     }
 
-    private function serveFailedAsset(string $cachePath, ?int $temporaryTtl, ?int $notFoundTtl = null): string
+    private function serveFailedAsset(string $cachePath, string $cacheKind, ?int $temporaryTtl, ?int $notFoundTtl = null): string
     {
         $stale = DiskCache::read($cachePath);
         $cap = $notFoundTtl ?? $temporaryTtl;
-        if ($stale === null) {
+        if ($stale === null || !self::isUsableAsset($stale, $cacheKind)) {
             if ($cap !== null) {
                 throw new MapAssetUnavailable($notFoundTtl);
             }
@@ -578,6 +598,15 @@ class MapboxStyleProxy
         }
 
         return $stale;
+    }
+
+    private static function writeCacheBestEffort(string $path, string $body, string $resourceType): void
+    {
+        try {
+            DiskCache::writeAtomically($path, $body);
+        } catch (RuntimeException) {
+            Log::warning('Could not write Mapbox asset cache', ['resourceType' => $resourceType]);
+        }
     }
 
     private static function failureTtl(?array $config, string $key, int $default): int
@@ -594,7 +623,7 @@ class MapboxStyleProxy
         array $styleCfg,
         string $resourceType,
         string $url,
-        bool $validateBody = false,
+        ?string $cacheKind = null,
     ): UpstreamFetchResult {
         $expectedContentType = self::expectedContentTypeFor($resourceType, $url);
         $result = UpstreamFetcher::fetch(
@@ -605,20 +634,72 @@ class MapboxStyleProxy
             self::alternateContentTypesFor($cfg, $styleCfg, $resourceType)
         );
 
-        if ($validateBody && $result->isSuccess()) {
-            try {
-                if ($expectedContentType === 'application/json') {
-                    self::decodeJson($result->body);
-                } elseif ($expectedContentType === 'image/png' && !Utils::isDecodableImage($result->body)) {
-                    throw new RuntimeException('Invalid upstream sprite');
-                }
-            } catch (JsonException|RuntimeException) {
-                Log::warning('Upstream map asset body is invalid', ['resourceType' => $resourceType]);
-                return new UpstreamFetchResult(null, $result->statusCode, false, error: 'invalid map asset body');
-            }
+        if ($cacheKind !== null && $result->isSuccess()
+            && ($result->statusCode !== 200 || !self::isUsableAsset($result->body, $cacheKind))
+        ) {
+            Log::warning('Upstream map asset response is unusable', ['resourceType' => $resourceType]);
+            return new UpstreamFetchResult(null, $result->statusCode, false, error: 'unusable map asset response');
         }
 
         return $result;
+    }
+
+    private static function cacheKind(string $resourceType, string $url): string
+    {
+        if ($resourceType === 'sprite') {
+            return str_ends_with($url, '.png') ? 'sprite-png' : 'sprite-json';
+        }
+
+        return $resourceType;
+    }
+
+    private static function isUsableAsset(string $body, string $cacheKind): bool
+    {
+        if ($body === '') {
+            return false;
+        }
+        if ($cacheKind === 'sprite-png') {
+            $image = @getimagesizefromstring($body);
+            return ($image[2] ?? null) === IMAGETYPE_PNG && Utils::isDecodableImage($body);
+        }
+        if (!in_array($cacheKind, ['style', 'tilejson', 'sprite-json'], true)) {
+            return true;
+        }
+
+        $json = json_decode($body);
+        if (!$json instanceof stdClass) {
+            return false;
+        }
+
+        return match ($cacheKind) {
+            'style' => ($json->version ?? null) === 8
+                && ($json->sources ?? null) instanceof stdClass
+                && array_filter((array)$json->sources, 'is_object') === (array)$json->sources
+                && is_array($json->layers ?? null)
+                && array_filter($json->layers, 'is_object') === $json->layers
+                && (!isset($json->metadata) || $json->metadata instanceof stdClass),
+            'tilejson' => is_array($json->tiles ?? null)
+                && $json->tiles !== []
+                && array_filter($json->tiles, static fn ($tile) => is_string($tile) && $tile !== '') === $json->tiles,
+            'sprite-json' => self::isSpriteIndex($json),
+        };
+    }
+
+    private static function isSpriteIndex(stdClass $json): bool
+    {
+        foreach (get_object_vars($json) as $sprite) {
+            if (!$sprite instanceof stdClass) {
+                return false;
+            }
+
+            foreach (['x', 'y', 'width', 'height'] as $field) {
+                if (!is_int($sprite->$field ?? null) || $sprite->$field < 0) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     private static function expectedContentTypeFor(string $resourceType, string $upstreamUrl): ?string

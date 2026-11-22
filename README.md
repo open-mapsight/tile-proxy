@@ -52,8 +52,9 @@ sending output.
 The configuration defines the behavior of the proxy.
 
 * `cacheServerPath`: Base directory for caching tiles and map assets.
-* `cacheLockTimeout`: (Raster tiles, optional) Maximum seconds to wait for a tile's exclusive cache lock.
-  Defaults to `2.85` for compatibility; set it above the full upstream fetch and processing budget.
+* `cacheLockTimeout`: (Optional) Maximum seconds to wait for a raster tile lock or an opt-in Mapbox
+  asset refresh lock. Defaults to `2.85` seconds. For raster tiles, set it above the full upstream fetch
+  and processing budget.
 * `ops`: (Raster tiles) Operation pipeline for bitmap tile requests.
 * `mapAssetBasePath`: (Mapbox styles) URL path prefix for proxied style JSON, vector tiles, sprites, and glyphs.
 * `styles`: (Mapbox styles) Named style configurations for `MapboxStyleProxy`.
@@ -525,13 +526,22 @@ server cooldown or makes stale client responses immediately stale.
 A temporary failure serves stale bytes with the shorter browser TTL. The cap also applies when a stale
 style or TileJSON document was used to resolve another asset. If no stale bytes are available, the proxy
 returns HTTP 503 with `Cache-Control: no-store`. Permanent 4xx responses keep the existing stale fallback
-and cold-asset error behavior. Enabled refreshes use a per-asset lock with the root `cacheLockTimeout`.
-If the lock is busy beyond that timeout, the proxy serves stale data or returns 503. The raster cache
-pruner does not clean Mapbox assets, including their lock files and retry metadata.
+and cold-asset error behavior. Enabled refreshes share up to 256 stable lock files per cache root and
+use the root `cacheLockTimeout`. Assets assigned to the same lock may wait for each other. An unavailable
+lock serves stale data or returns 503. Failed cache writes are logged and the response can still be served.
+This also applies to a style that only enables the vector tile 404 policy. Workers sharing that cache
+need compatible permissions and cross-worker `flock()`.
+
+The raster cache pruner leaves Mapbox payloads, locks and retry metadata in place. Each distinct failed
+asset with a nonzero cooldown can leave one sidecar. Remove unused Mapbox entries separately with all
+workers for that cache stopped.
 
 The same [circuit breaker settings](#circuit-breaker) can be enabled on a named style. Assets on the same
 requested origin within that style share a circuit. The breaker can be enabled independently of the
-per-asset cooldowns. Either option validates fetched JSON and sprite images before caching them.
+per-asset cooldowns. Either option checks newly fetched and existing cached assets before serving them.
+Style JSON must have a version 8 object with sources and layers, TileJSON must have tile URL strings,
+and sprite indexes and PNGs must have the expected structure and image format. These checks cover the
+fields used by the proxy.
 
 ### Web fonts for OpenLayers
 
