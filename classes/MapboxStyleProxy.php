@@ -35,11 +35,15 @@ class MapboxStyleProxy
         try {
             $response = $proxy->routeRequest($cfg, $requestPath);
         } catch (MapAssetUnavailable $e) {
-            if ($e->notFoundTtl !== null) {
-                return new HttpResponse(null, null, $e->notFoundTtl, null);
+            if ($e->notFoundTtl === null) {
+                return new HttpResponse(
+                    'Upstream map asset unavailable', 'text/plain', 0, null,
+                    statusCode: 503,
+                    retryAfter: $e->retryAfter,
+                );
             }
 
-            return new HttpResponse('Upstream map asset unavailable', 'text/plain', 0, null, statusCode: 503);
+            return HttpResponse::missing(min($e->notFoundTtl, $proxy->responseTtlCap ?? PHP_INT_MAX));
         }
 
         if ($proxy->responseTtlCap === null || $response->cacheBrowserTtl === null) {
@@ -53,6 +57,7 @@ class MapboxStyleProxy
             $response->cacheMTime,
             $response->notModified,
             $response->statusCode,
+            $response->retryAfter,
         );
     }
 
@@ -529,15 +534,17 @@ class MapboxStyleProxy
             $failure = json_decode(DiskCache::read($failurePath) ?? '', true);
             $kind = $failure['kind'] ?? null;
             $at = $failure['at'] ?? null;
-            if (is_string($kind) && isset($cooldowns[$kind]) && is_int($at)
-                && $cooldowns[$kind] > 0 && time() - $at < $cooldowns[$kind]
-            ) {
-                return $this->serveFailedAsset(
-                    $cachePath,
-                    $cacheKind,
-                    $kind === 'temporary' ? $failureBrowserTtl : null,
-                    $kind === 'notFound' ? $notFound?->browserTtl($at) : null,
-                );
+            if (is_int($at) && $at >= 0 && is_string($kind) && isset($cooldowns[$kind])) {
+                $remaining = $cooldowns[$kind] - max(0, time() - $at);
+                if ($remaining > 0) {
+                    return $this->serveFailedAsset(
+                        $cachePath,
+                        $cacheKind,
+                        $kind === 'temporary' ? $failureBrowserTtl : null,
+                        $kind === 'notFound' ? $notFound?->browserTtl($at) : null,
+                        $kind === 'temporary' ? $remaining : null,
+                    );
+                }
             }
 
             if ($breaker !== null) {
@@ -559,9 +566,10 @@ class MapboxStyleProxy
                 default => 'temporary',
             };
             $now = time();
+            $savedCooldown = false;
             if ($result !== null) {
                 if ($cooldowns[$kind] > 0) {
-                    self::writeCacheBestEffort(
+                    $savedCooldown = self::writeCacheBestEffort(
                         $failurePath,
                         json_encode(['kind' => $kind, 'at' => $now], JSON_THROW_ON_ERROR),
                         $resourceType,
@@ -576,19 +584,25 @@ class MapboxStyleProxy
                 $cacheKind,
                 $kind === 'temporary' && $resilienceEnabled ? $failureBrowserTtl : null,
                 $kind === 'notFound' ? $notFound?->browserTtl($now) : null,
+                $kind === 'temporary' && $savedCooldown ? max(0, $cooldowns[$kind] - max(0, time() - $now)) : null,
             );
         } finally {
             $lock->release();
         }
     }
 
-    private function serveFailedAsset(string $cachePath, string $cacheKind, ?int $temporaryTtl, ?int $notFoundTtl = null): string
-    {
+    private function serveFailedAsset(
+        string $cachePath,
+        string $cacheKind,
+        ?int $temporaryTtl,
+        ?int $notFoundTtl = null,
+        ?int $retryAfter = null,
+    ): string {
         $stale = DiskCache::read($cachePath);
         $cap = $notFoundTtl ?? $temporaryTtl;
         if ($stale === null || !self::isUsableAsset($stale, $cacheKind)) {
             if ($cap !== null) {
-                throw new MapAssetUnavailable($notFoundTtl);
+                throw new MapAssetUnavailable($notFoundTtl, $retryAfter);
             }
             throw new UserException('Could not fetch upstream map asset');
         }
@@ -600,12 +614,14 @@ class MapboxStyleProxy
         return $stale;
     }
 
-    private static function writeCacheBestEffort(string $path, string $body, string $resourceType): void
+    private static function writeCacheBestEffort(string $path, string $body, string $resourceType): bool
     {
         try {
             DiskCache::writeAtomically($path, $body);
+            return true;
         } catch (RuntimeException) {
             Log::warning('Could not write Mapbox asset cache', ['resourceType' => $resourceType]);
+            return false;
         }
     }
 

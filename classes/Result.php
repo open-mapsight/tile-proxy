@@ -60,12 +60,16 @@ class Result
     public function forceLoadFromCache(): ?string
     {
         $path = $this->cachePath . '-' . $this->cacheName . '-' . ($this->cacheStep - 1);
-        $d = @file_get_contents($path);
-        if ($d === false) {
-            $d = null;
+        $data = @file_get_contents($path);
+        if ($data === false) {
+            $this->data = null;
+            return null;
         }
-        $this->data = $d;
-        return $d;
+
+        $mtime = @filemtime($path);
+        $this->cacheMTime = $mtime === false ? null : $mtime;
+        $this->data = $data;
+        return $data;
     }
 
     // call `getData` *after* `checkpointCache`

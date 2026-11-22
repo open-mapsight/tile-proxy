@@ -164,6 +164,41 @@ class UpstreamFailureTest extends TestCase
         self::assertStringNotContainsString('last404', file_get_contents($path));
     }
 
+    public function testRaster404CooldownUsesTheStaleRepresentationForConditionalRequests(): void
+    {
+        $src = $this->httpSrc('src') + ['cacheServer404Ttl' => 120, 'cacheBrowser404Ttl' => 60];
+        $this->useUpstream([$this->pngResponse(), new Response(404)]);
+        $this->requestRaster([$src]);
+        $path = $this->tempDir . '/base-cache/1/0/0-src-0';
+        $mtime = time() - 7200;
+        touch($path, $mtime);
+        clearstatcache(true, $path);
+
+        $stale = $this->requestRaster([$src]);
+        self::assertSame($this->png, $stale->body);
+        self::assertSame($mtime, $stale->cacheMTime);
+
+        $savedServer = $_SERVER;
+        try {
+            $_SERVER['HTTP_IF_MODIFIED_SINCE'] = gmdate('D, d M Y H:i:s', $mtime) . ' GMT';
+            $conditional = $this->requestRaster([$src]);
+            self::assertTrue($conditional->notModified);
+            self::assertNull($conditional->body);
+            self::assertSame($mtime, $conditional->cacheMTime);
+            self::assertSame(60, $conditional->cacheBrowserTtl);
+        } finally {
+            $_SERVER = $savedServer;
+        }
+    }
+
+    public function testNull404CacheTtlIsRejected(): void
+    {
+        $src = $this->httpSrc('src') + ['cacheServer404Ttl' => null];
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('cacheServer404Ttl must be a non-negative integer');
+        $this->requestRaster([$src]);
+    }
+
     public function testRaster404WithServerCachingDisabledCanRecoverOnTheNextRequest(): void
     {
         $src = $this->httpSrc('src') + ['cacheServer404Ttl' => 0];

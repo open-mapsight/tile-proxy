@@ -8,8 +8,10 @@ use RuntimeException;
 /** @internal */
 final class MapAssetUnavailable extends RuntimeException
 {
-    public function __construct(public readonly ?int $notFoundTtl = null)
-    {
+    public function __construct(
+        public readonly ?int $notFoundTtl = null,
+        public readonly ?int $retryAfter = null,
+    ) {
         parent::__construct();
     }
 }

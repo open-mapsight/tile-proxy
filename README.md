@@ -9,7 +9,8 @@ You can initialize the proxy by providing a configuration array or by pointing t
 ### Initialization
 
 Use `Proxy` when a single config serves both raster tile pipelines and Mapbox style assets. It routes style asset
-requests under `mapAssetBasePath` to `MapboxStyleProxy` and everything else with an `ops` pipeline to `Base`.
+requests under `mapAssetBasePath`, including fonts, to `MapboxStyleProxy` and everything else with an `ops`
+pipeline to `Base`.
 
 #### Combined or JSONC configuration
 ```php
@@ -163,7 +164,8 @@ is failing. The object accepts three positive integer settings: `failureThreshol
 `failureWindow` (default 30 seconds), and `openTtl` (default 30 seconds). The window starts at the first
 temporary failure and counts failures even if other requests succeed during it. Permanent 4xx responses
 do not count. An open circuit follows the temporary-failure fallback without starting a per-tile cooldown
-for a skipped fetch. Fresh cache hits are unaffected.
+for a skipped fetch. Temporary raster misses send 404 with `Cache-Control: no-store`. Fresh cache hits
+keep their existing TTL.
 
 The breaker groups requests by source cache name and requested HTTP(S) origin, including scheme and port.
 Different mirror origins have separate circuits. Requests still select one mirror at a time. After the
@@ -188,7 +190,8 @@ integer seconds. When the policy is enabled, each omitted setting defaults to ze
 * `cacheBrowser404Ttl` caps the browser TTL for a stale tile or a raster composite affected by the 404.
   For a missing tile, a positive value sends `Cache-Control: public, max-age=...` and `Expires`.
   Zero sends `Cache-Control: no-store` on the missing response. When the server TTL is positive, the browser
-  TTL is capped by the remaining server cooldown.
+  TTL is capped by the remaining server cooldown. A vector 404 also respects the TTL cap of any stale
+  style or TileJSON it used.
 
 Stale tile bytes can still be served and retain their age. Missing responses have no Last-Modified header
 and cannot produce a 304. Raster errors other than an upstream 404 use their usual cooldowns and send
@@ -525,7 +528,8 @@ server cooldown or makes stale client responses immediately stale.
 
 A temporary failure serves stale bytes with the shorter browser TTL. The cap also applies when a stale
 style or TileJSON document was used to resolve another asset. If no stale bytes are available, the proxy
-returns HTTP 503 with `Cache-Control: no-store`. Permanent 4xx responses keep the existing stale fallback
+returns HTTP 503 with `Cache-Control: no-store` and includes `Retry-After` when a per-asset temporary
+cooldown is recorded. Permanent 4xx responses keep the existing stale fallback
 and cold-asset error behavior. Enabled refreshes share up to 256 stable lock files per cache root and
 use the root `cacheLockTimeout`. Assets assigned to the same lock may wait for each other. An unavailable
 lock serves stale data or returns 503. Failed cache writes are logged and the response can still be served.

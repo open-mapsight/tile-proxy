@@ -59,7 +59,7 @@ class Proxy
             return false;
         }
 
-        return preg_match('#^(styles|tilejson|tiles|sprites|glyphs)/#', $routePath) === 1;
+        return preg_match('#^(styles|tilejson|tiles|sprites|glyphs|fonts)/#', $routePath) === 1;
     }
 
     /**

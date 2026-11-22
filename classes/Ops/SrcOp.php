@@ -21,6 +21,7 @@ class SrcOp implements OpHandler
         $res->cacheBrowserTtl = $cfg['cacheBrowserTtl'];
 
         $notFound = TileNotFoundPolicy::fromConfig($cfg);
+        $breakerEnabled = isset($cfg['upstreamCircuitBreaker']);
         $metadata = $res->getMetadata();
         if ($notFound !== null) {
             $res->cacheBrowserTtlNotFound = 0;
@@ -31,7 +32,7 @@ class SrcOp implements OpHandler
             }
         }
 
-        $invalidateCache = (static function () use ($res, $cfg) {
+        $invalidateCache = (static function () use ($res, $cfg, $breakerEnabled) {
             if (
                 $res->getMetadata()->getLast4xx() !== null
                 && time() - ($cfg['cacheServer4xxTtl'] ?? 3600) < $res->getMetadata()->getLast4xx()
@@ -45,6 +46,9 @@ class SrcOp implements OpHandler
                 && time() - ($cfg['cacheServer5xxTtl'] ?? 300) < $res->getMetadata()->getLast5xx()
             ) {
                 // last request failed temporarily & we're in the retry cooldown window
+                if ($breakerEnabled) {
+                    $res->cacheBrowserTtlNotFound = 0;
+                }
                 $res->cacheBrowserTtl = min($res->cacheBrowserTtl, $cfg['cacheBrowserTtlFail'] ?? 300);
                 return false;
             }
@@ -64,7 +68,6 @@ class SrcOp implements OpHandler
 
         if ($invalidateCache) {
             $url = $this->getSrcUrl($cfg, $res);
-            $breakerEnabled = isset($cfg['upstreamCircuitBreaker']);
             $httpConfig = $cfg['upstreamHttp'] ?? [];
             if ($breakerEnabled) {
                 $httpConfig = UpstreamCircuitBreaker::withHttpTimeout($url, $httpConfig);
@@ -98,7 +101,10 @@ class SrcOp implements OpHandler
                 // content type, empty or undecodable body. A stale cached copy is still served;
                 // the source is retried after `cacheServer5xxTtl`.
                 if ($fetchResult !== null) {
-                    $res->getMetadata()->setLast5xx(time());
+                    $metadata->setLast5xx(time());
+                }
+                if ($breakerEnabled) {
+                    $res->cacheBrowserTtlNotFound = 0;
                 }
                 $res->cacheBrowserTtl = min($res->cacheBrowserTtl, $cfg['cacheBrowserTtlFail'] ?? 300);
             }

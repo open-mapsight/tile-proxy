@@ -14,8 +14,14 @@ class HttpResponse
         public readonly ?int    $cacheMTime,
         public readonly bool    $notModified = false,
         public readonly ?int    $statusCode = null,
+        public readonly ?int    $retryAfter = null,
     )
     {
+    }
+
+    public static function missing(?int $browserTtl): self
+    {
+        return new self(null, null, $browserTtl, null, statusCode: 404);
     }
 
     public function isNotFound(): bool
@@ -48,7 +54,9 @@ class HttpResponse
     {
         if ($response->isNotFound()) {
             header('HTTP/1.0 404 Not Found', true, 404);
-            self::sendCacheHeaders($response->cacheBrowserTtl, true);
+            if ($response->statusCode === 404) {
+                self::sendCacheHeaders($response->cacheBrowserTtl, true);
+            }
             echo 'tile not found';
             return;
         }
@@ -62,6 +70,9 @@ class HttpResponse
         header('Content-Type: ' . $response->mimeType);
 
         self::sendCacheHeaders($response->cacheBrowserTtl, $response->statusCode === 503);
+        if ($response->retryAfter !== null) {
+            header('Retry-After: ' . $response->retryAfter);
+        }
 
         if ($response->cacheMTime !== null) {
             header('Last-Modified: ' . gmdate('D, d M Y H:i:s', $response->cacheMTime) . ' GMT');

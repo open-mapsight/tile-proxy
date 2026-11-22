@@ -38,7 +38,7 @@ final class TileNotFoundPolicy
 
     private static function readTtl(array $config, string $key): int
     {
-        $value = $config[$key] ?? 0;
+        $value = array_key_exists($key, $config) ? $config[$key] : 0;
         if (!is_int($value) || $value < 0) {
             throw new InvalidArgumentException($key . ' must be a non-negative integer');
         }
