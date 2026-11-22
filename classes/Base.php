@@ -97,7 +97,7 @@ class Base
     {
         $data = $res->getData();
         if ($data === null) {
-            return new HttpResponse(null, null, null, null);
+            return new HttpResponse(null, null, $res->cacheBrowserTtlNotFound, null);
         }
 
         assert($res->mimeType !== null);

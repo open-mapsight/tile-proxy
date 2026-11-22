@@ -48,13 +48,12 @@ class HttpResponse
     {
         if ($response->isNotFound()) {
             header('HTTP/1.0 404 Not Found', true, 404);
+            self::sendCacheHeaders($response->cacheBrowserTtl, true);
             echo 'tile not found';
             return;
         }
 
         assert($response->mimeType !== null);
-
-        $time = time();
 
         if ($response->statusCode !== null) {
             http_response_code($response->statusCode);
@@ -62,12 +61,7 @@ class HttpResponse
 
         header('Content-Type: ' . $response->mimeType);
 
-        if ($response->statusCode === 503 && $response->cacheBrowserTtl === 0) {
-            header('Cache-Control: no-store');
-        } elseif ($response->cacheBrowserTtl !== null) {
-            header('Expires: ' . gmdate('D, d M Y H:i:s', $time + $response->cacheBrowserTtl) . ' GMT');
-            header('Cache-Control: public, max-age=' . $response->cacheBrowserTtl);
-        }
+        self::sendCacheHeaders($response->cacheBrowserTtl, $response->statusCode === 503);
 
         if ($response->cacheMTime !== null) {
             header('Last-Modified: ' . gmdate('D, d M Y H:i:s', $response->cacheMTime) . ' GMT');
@@ -81,5 +75,15 @@ class HttpResponse
         assert($response->body !== null);
         header('Content-Length: ' . strlen($response->body));
         echo $response->body;
+    }
+
+    private static function sendCacheHeaders(?int $ttl, bool $noStoreAtZero): void
+    {
+        if ($ttl === 0 && $noStoreAtZero) {
+            header('Cache-Control: no-store');
+        } elseif ($ttl !== null) {
+            header('Expires: ' . gmdate('D, d M Y H:i:s', time() + $ttl) . ' GMT');
+            header('Cache-Control: public, max-age=' . $ttl);
+        }
     }
 }

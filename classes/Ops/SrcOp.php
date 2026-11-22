@@ -5,6 +5,7 @@ namespace OpenMapsight\TileProxy\Ops;
 
 use OpenMapsight\TileProxy\Log;
 use OpenMapsight\TileProxy\Result;
+use OpenMapsight\TileProxy\TileNotFoundPolicy;
 use OpenMapsight\TileProxy\UpstreamCircuitBreaker;
 use OpenMapsight\TileProxy\UpstreamFetcher;
 use OpenMapsight\TileProxy\UpstreamFetchResult;
@@ -18,6 +19,17 @@ class SrcOp implements OpHandler
     {
         $res->mimeType = $cfg['mimeType'];
         $res->cacheBrowserTtl = $cfg['cacheBrowserTtl'];
+
+        $notFound = TileNotFoundPolicy::fromConfig($cfg);
+        $metadata = $res->getMetadata();
+        if ($notFound !== null) {
+            $res->cacheBrowserTtlNotFound = 0;
+            $last404 = $metadata->getLast404();
+            if ($last404 !== null && $notFound->remainingServerTtl($last404) > 0) {
+                $this->applyNotFoundTtl($res, $notFound->browserTtl($last404));
+                return $next($res);
+            }
+        }
 
         $invalidateCache = (static function () use ($res, $cfg) {
             if (
@@ -62,8 +74,18 @@ class SrcOp implements OpHandler
                 $fetchResult = $fetch();
             }
 
+            if ($notFound !== null && $fetchResult !== null && $metadata->getLast404() !== null) {
+                $metadata->clearLast404();
+            }
+
             if ($fetchResult?->isSuccess()) {
                 $res->setData($fetchResult->body);
+            } elseif ($notFound !== null && $fetchResult?->statusCode === 404) {
+                $now = time();
+                if ($notFound->serverTtl > 0) {
+                    $metadata->setLast404($now);
+                }
+                $this->applyNotFoundTtl($res, $notFound->browserTtl($now));
             } elseif ($fetchResult?->isPermanentClientError()) {
                 $res->getMetadata()->setLast4xx(time());
             } else {
@@ -78,6 +100,12 @@ class SrcOp implements OpHandler
         }
 
         return $next($res);
+    }
+
+    private function applyNotFoundTtl(Result $res, int $ttl): void
+    {
+        $res->cacheBrowserTtlNotFound = $ttl;
+        $res->cacheBrowserTtl = min($res->cacheBrowserTtl, $ttl);
     }
 
     private function fetchTile(string $url, array $cfg): UpstreamFetchResult

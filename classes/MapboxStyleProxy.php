@@ -34,7 +34,11 @@ class MapboxStyleProxy
         $proxy = new self();
         try {
             $response = $proxy->routeRequest($cfg, $requestPath);
-        } catch (MapAssetUnavailable) {
+        } catch (MapAssetUnavailable $e) {
+            if ($e->notFoundTtl !== null) {
+                return new HttpResponse(null, null, $e->notFoundTtl, null);
+            }
+
             return new HttpResponse('Upstream map asset unavailable', 'text/plain', 0, null, statusCode: 503);
         }
 
@@ -48,6 +52,7 @@ class MapboxStyleProxy
             min($response->cacheBrowserTtl, $proxy->responseTtlCap),
             $response->cacheMTime,
             $response->notModified,
+            $response->statusCode,
         );
     }
 
@@ -475,7 +480,9 @@ class MapboxStyleProxy
 
         $failureConfig = $styleCfg['upstreamFailureCache'] ?? null;
         $breakerConfig = $styleCfg['upstreamCircuitBreaker'] ?? null;
-        if ($failureConfig === null && $breakerConfig === null) {
+        $resilienceEnabled = $failureConfig !== null || $breakerConfig !== null;
+        $notFound = $resourceType === 'tile' ? TileNotFoundPolicy::fromConfig($styleCfg) : null;
+        if (!$resilienceEnabled && $notFound === null) {
             $result = self::fetchAsset($cfg, $styleCfg, $resourceType, $upstreamUrl);
             if ($result->isSuccess()) {
                 DiskCache::write($cachePath, $result->body);
@@ -492,12 +499,13 @@ class MapboxStyleProxy
         $cooldowns = [
             'permanent' => $failureConfig === null ? 0 : self::failureTtl($failureConfig, 'cacheServer4xxTtl', 3600),
             'temporary' => $failureConfig === null ? 0 : self::failureTtl($failureConfig, 'cacheServer5xxTtl', 300),
+            'notFound' => $notFound->serverTtl ?? 0,
         ];
         $failureBrowserTtl = self::failureTtl($failureConfig, 'cacheBrowserTtlFail', 300);
         $breaker = $breakerConfig === null ? null : new UpstreamCircuitBreaker($cfg['cacheServerPath'], $breakerConfig);
         $lock = FileLock::acquire($cachePath . '.lock', (float)($cfg['cacheLockTimeout'] ?? 2.85));
         if ($lock === null) {
-            return $this->serveFailedAsset($cachePath, 'temporary', $failureBrowserTtl);
+            return $this->serveFailedAsset($cachePath, temporaryTtl: $failureBrowserTtl);
         }
 
         try {
@@ -509,13 +517,18 @@ class MapboxStyleProxy
             $failurePath = $cachePath . '.failure.json';
             $failure = json_decode(DiskCache::read($failurePath) ?? '', true);
             $kind = $failure['kind'] ?? null;
-            if (is_string($kind) && isset($cooldowns[$kind]) && is_int($failure['at'] ?? null)
-                && time() - $failure['at'] < $cooldowns[$kind]
+            $at = $failure['at'] ?? null;
+            if (is_string($kind) && isset($cooldowns[$kind]) && is_int($at)
+                && $cooldowns[$kind] > 0 && time() - $at < $cooldowns[$kind]
             ) {
-                return $this->serveFailedAsset($cachePath, $kind, $failureBrowserTtl);
+                return $this->serveFailedAsset(
+                    $cachePath,
+                    $kind === 'temporary' ? $failureBrowserTtl : null,
+                    $kind === 'notFound' ? $notFound?->browserTtl($at) : null,
+                );
             }
 
-            $fetch = static fn () => self::fetchAsset($cfg, $styleCfg, $resourceType, $upstreamUrl, true);
+            $fetch = static fn () => self::fetchAsset($cfg, $styleCfg, $resourceType, $upstreamUrl, $resilienceEnabled);
             $result = $breaker === null ? $fetch() : $breaker->fetch('mapbox:' . $styleName, $upstreamUrl, $fetch);
             if ($result?->isSuccess()) {
                 DiskCache::writeAtomically($cachePath, $result->body);
@@ -525,29 +538,46 @@ class MapboxStyleProxy
                 return $result->body;
             }
 
-            $kind = $result?->isPermanentClientError() ? 'permanent' : 'temporary';
-            if ($result !== null && $cooldowns[$kind] > 0) {
-                DiskCache::writeAtomically($failurePath, json_encode(['kind' => $kind, 'at' => time()], JSON_THROW_ON_ERROR));
+            $kind = match (true) {
+                $notFound !== null && $result?->statusCode === 404 => 'notFound',
+                $result?->isPermanentClientError() === true => 'permanent',
+                default => 'temporary',
+            };
+            $now = time();
+            if ($result !== null) {
+                if ($cooldowns[$kind] > 0) {
+                    DiskCache::writeAtomically($failurePath, json_encode(['kind' => $kind, 'at' => $now], JSON_THROW_ON_ERROR));
+                } elseif ($failure !== null) {
+                    @unlink($failurePath);
+                }
             }
 
-            return $this->serveFailedAsset($cachePath, $kind, $failureBrowserTtl);
+            return $this->serveFailedAsset(
+                $cachePath,
+                $kind === 'temporary' && $resilienceEnabled ? $failureBrowserTtl : null,
+                $kind === 'notFound' ? $notFound?->browserTtl($now) : null,
+            );
         } finally {
             $lock->release();
         }
     }
 
-    private function serveFailedAsset(string $cachePath, string $kind, int $failureBrowserTtl): string
+    private function serveFailedAsset(string $cachePath, ?int $temporaryTtl, ?int $notFoundTtl = null): string
     {
         $stale = DiskCache::read($cachePath);
-        if ($kind === 'temporary') {
-            if ($stale === null) {
-                throw new MapAssetUnavailable();
+        $cap = $notFoundTtl ?? $temporaryTtl;
+        if ($stale === null) {
+            if ($cap !== null) {
+                throw new MapAssetUnavailable($notFoundTtl);
             }
-
-            $this->responseTtlCap = min($this->responseTtlCap ?? PHP_INT_MAX, $failureBrowserTtl);
+            throw new UserException('Could not fetch upstream map asset');
         }
 
-        return $stale ?? throw new UserException('Could not fetch upstream map asset');
+        if ($cap !== null) {
+            $this->responseTtlCap = min($this->responseTtlCap ?? PHP_INT_MAX, $cap);
+        }
+
+        return $stale;
     }
 
     private static function failureTtl(?array $config, string $key, int $default): int

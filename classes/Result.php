@@ -8,6 +8,7 @@ use Exception;
 class Result
 {
     public ?int $cacheBrowserTtl = null;
+    public ?int $cacheBrowserTtlNotFound = null;
     public ?string $mimeType = null;
     public ?int $cacheMTime = null;
     public ?Exception $failure = null;

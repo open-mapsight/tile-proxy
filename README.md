@@ -174,6 +174,25 @@ need the same filesystem, access as the same user, and working `flock()`. If cir
 upstream fetches continue and a warning is emitted through the configured logger. The logger also warns
 when the circuit opens, reopens, or recovers. Skipped requests do not each generate a warning.
 
+#### Caching upstream tile 404s
+
+Set `cacheServer404Ttl` or `cacheBrowser404Ttl` on a raster source or named Mapbox style to enable
+explicit caching of upstream HTTP 404s for its raster or vector tiles. Both settings are non-negative
+integer seconds. When the policy is enabled, each omitted setting defaults to zero.
+
+* `cacheServer404Ttl` stores a timestamp for the missing tile. Zero lets the next eligible request retry
+  upstream. The raster proxy uses its existing tile metadata. The Mapbox proxy uses an asset sidecar.
+* `cacheBrowser404Ttl` caps the browser TTL for a stale tile or a raster composite affected by the 404.
+  For a missing tile, a positive value sends `Cache-Control: public, max-age=...` and `Expires`.
+  Zero sends `Cache-Control: no-store` on the missing response. When the server TTL is positive, the browser
+  TTL is capped by the remaining server cooldown.
+
+Stale tile bytes can still be served and retain their age. Missing responses have no Last-Modified header
+and cannot produce a 304. Raster errors other than an upstream 404 use their usual cooldowns and send
+`no-store` if they leave the final tile absent. The policy applies only to tiles, so missing styles,
+TileJSON, sprites, glyphs and fonts use their regular failure handling.
+Omit both options to keep the existing 404 behavior, including the raster `cacheServer4xxTtl` cooldown.
+
 ### Raster cache retention
 
 `cacheServerTtl` controls freshness: an expired tile is refreshed on its next request, and a failed refresh can
@@ -505,7 +524,8 @@ A temporary failure serves stale bytes with the shorter browser TTL. The cap als
 style or TileJSON document was used to resolve another asset. If no stale bytes are available, the proxy
 returns HTTP 503 with `Cache-Control: no-store`. Permanent 4xx responses keep the existing stale fallback
 and cold-asset error behavior. Enabled refreshes use a per-asset lock with the root `cacheLockTimeout`.
-If the lock is busy beyond that timeout, the proxy serves stale data or returns 503.
+If the lock is busy beyond that timeout, the proxy serves stale data or returns 503. The raster cache
+pruner does not clean Mapbox assets, including their lock files and retry metadata.
 
 The same [circuit breaker settings](#circuit-breaker) can be enabled on a named style. Assets on the same
 requested origin within that style share a circuit. The breaker can be enabled independently of the

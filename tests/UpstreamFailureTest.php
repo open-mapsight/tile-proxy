@@ -11,6 +11,7 @@ use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
 use OpenMapsight\TileProxy\Base;
+use OpenMapsight\TileProxy\HttpResponse;
 use OpenMapsight\TileProxy\Metadata;
 use OpenMapsight\TileProxy\MetadataScope;
 use OpenMapsight\TileProxy\Processor;
@@ -125,6 +126,91 @@ class UpstreamFailureTest extends TestCase
             file_put_contents($paths[0], json_encode($state, JSON_THROW_ON_ERROR));
             $this->useUpstream([$this->pngResponse()]);
             self::assertSame($this->png, Base::handleTileRequest($cfg)->body);
+        } finally {
+            $_GET = $savedGet;
+        }
+    }
+
+    public function testRaster404IsCachedAsMetadataAndBoundsTheBrowserTtl(): void
+    {
+        $src = $this->httpSrc('src') + ['cacheServer404Ttl' => 120, 'cacheBrowser404Ttl' => 60];
+        $this->useUpstream([new Response(404, [], 'upstream error page')]);
+        $first = $this->requestRaster([$src]);
+        self::assertTrue($first->isNotFound());
+        self::assertSame(60, $first->cacheBrowserTtl);
+        self::assertNull($first->cacheMTime);
+        self::assertFalse($first->notModified);
+        self::assertSame([], glob($this->tempDir . '/base-cache/1/0/0-src-*'));
+
+        $path = $this->tempDir . '/base-cache/1/0/0-.metadata';
+        $data = json_decode(file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
+        self::assertCount(1, $data);
+        $key = array_key_first($data);
+        self::assertStringEndsWith('|last404', $key);
+
+        $data[$key] = time() - 100;
+        file_put_contents($path, json_encode($data, JSON_THROW_ON_ERROR));
+        $cached = $this->requestRaster([$src]);
+        self::assertTrue($cached->isNotFound());
+        self::assertGreaterThan(0, $cached->cacheBrowserTtl);
+        self::assertLessThanOrEqual(20, $cached->cacheBrowserTtl);
+        self::assertCount(1, $this->history);
+
+        $data[$key] = time() - 121;
+        file_put_contents($path, json_encode($data, JSON_THROW_ON_ERROR));
+        $this->mock->append($this->pngResponse());
+        self::assertSame($this->png, $this->requestRaster([$src])->body);
+        self::assertStringNotContainsString('last404', file_get_contents($path));
+    }
+
+    public function testRaster404WithServerCachingDisabledCanRecoverOnTheNextRequest(): void
+    {
+        $src = $this->httpSrc('src') + ['cacheServer404Ttl' => 0];
+        $this->useUpstream([new Response(404), $this->pngResponse()]);
+        self::assertSame(0, $this->requestRaster([$src])->cacheBrowserTtl);
+        self::assertSame($this->png, $this->requestRaster([$src])->body);
+        self::assertCount(2, $this->history);
+    }
+
+    public function testRasterTemporaryFailureCannotUseThe404BrowserTtl(): void
+    {
+        $src = $this->httpSrc('src') + ['cacheServer404Ttl' => 120, 'cacheBrowser404Ttl' => 60];
+        $this->useUpstream([new Response(503)]);
+        $response = $this->requestRaster([$src]);
+        self::assertTrue($response->isNotFound());
+        self::assertSame(0, $response->cacheBrowserTtl);
+        $metadata = file_get_contents($this->tempDir . '/base-cache/1/0/0-.metadata');
+        self::assertStringContainsString('last5xx', $metadata);
+        self::assertStringNotContainsString('last404', $metadata);
+    }
+
+    public function testRaster404CapsTheCompositeTtlAndKeepsTheStaleLayer(): void
+    {
+        $src = $this->httpSrc('overlay') + ['cacheServer404Ttl' => 120, 'cacheBrowser404Ttl' => 25];
+        $ops = [
+            $this->fileSrc('base'),
+            ['op' => 'merge', 'ops' => [$src], 'cacheServerName' => 'merged'],
+        ];
+
+        $this->useUpstream([$this->pngResponse(), new Response(404)]);
+        self::assertSame(3600, $this->requestRaster($ops)->cacheBrowserTtl);
+        $path = $this->tempDir . '/base-cache/1/0/0-overlay-0';
+        touch($path, time() - 7200);
+        clearstatcache(true, $path);
+
+        $stale = $this->requestRaster($ops);
+        self::assertFalse($stale->isNotFound());
+        self::assertSame(25, $stale->cacheBrowserTtl);
+        self::assertSame($this->png, file_get_contents($path));
+        self::assertLessThanOrEqual(time() - 7200, filemtime($path));
+    }
+
+    private function requestRaster(array $ops): HttpResponse
+    {
+        $savedGet = $_GET;
+        try {
+            $_GET = ['z' => '1', 'x' => '0', 'y' => '0'];
+            return Base::handleTileRequest(['cacheServerPath' => $this->tempDir . '/base-cache', 'ops' => $ops]);
         } finally {
             $_GET = $savedGet;
         }

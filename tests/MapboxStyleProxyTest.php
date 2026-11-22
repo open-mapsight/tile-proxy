@@ -300,6 +300,49 @@ class MapboxStyleProxyTest extends TestCase
         MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/tiles/city-default/directTiles/0/1/0/0.pbf');
     }
 
+    public function testVectorTile404UsesAnIndependentNegativeCacheAndCanRecover(): void
+    {
+        $this->configureRemoteStyle([
+            'upstreamFailureCache' => [],
+            'cacheServer404Ttl' => 120,
+            'cacheBrowser404Ttl' => 60,
+        ]);
+        $mock = $this->mockUpstream([$this->remoteStyleResponse(), new Response(404, [], 'upstream error page')]);
+        $path = '/map-assets/tiles/city-default/directTiles/0/1/0/0.pbf';
+        $cachePath = $this->cacheDir . '/mapbox-style-proxy/city-default/tile/'
+            . sha1('https://tiles.example.test/vector/1/0/0.pbf');
+        for ($request = 0; $request < 2; ++$request) {
+            $missing = MapboxStyleProxy::handleRequest($this->cfg, $path);
+            self::assertTrue($missing->isNotFound());
+            self::assertSame(60, $missing->cacheBrowserTtl);
+            self::assertNull($missing->cacheMTime);
+        }
+        self::assertFileDoesNotExist($cachePath);
+        file_put_contents($cachePath . '.failure.json', json_encode([
+            'kind' => 'notFound', 'at' => time() - 121,
+        ], JSON_THROW_ON_ERROR));
+
+        $mock->append(new Response(200, ['Content-Type' => 'application/x-protobuf'], 'new tile'));
+        self::assertSame('new tile', MapboxStyleProxy::handleRequest($this->cfg, $path)->body);
+        self::assertFileDoesNotExist($cachePath . '.failure.json');
+
+        touch($cachePath, time() - 700000);
+        $mock->append(new Response(404));
+        $stale = MapboxStyleProxy::handleRequest($this->cfg, $path);
+        self::assertSame('new tile', $stale->body);
+        self::assertSame(60, $stale->cacheBrowserTtl);
+        self::assertLessThanOrEqual(time() - 700000, filemtime($cachePath));
+    }
+
+    public function testTile404PolicyDoesNotApplyToMissingStyles(): void
+    {
+        $this->configureRemoteStyle(['cacheServer404Ttl' => 120, 'cacheBrowser404Ttl' => 60]);
+        $this->mockUpstream([new Response(404)]);
+        $this->expectException(UserException::class);
+        $this->expectExceptionMessage('Could not fetch upstream map asset');
+        MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/styles/city-default.json');
+    }
+
     private function mockUpstream(array $responses): MockHandler
     {
         $mock = new MockHandler($responses);
