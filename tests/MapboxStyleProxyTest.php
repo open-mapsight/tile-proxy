@@ -689,6 +689,63 @@ class MapboxStyleProxyTest extends TestCase
         self::assertSame($original, file_get_contents($cachePath));
     }
 
+    public function testOptInStyleAllowsWildcardMetadataUntilARewriteWritesIt(): void
+    {
+        $this->configureRemoteStyle(['upstreamFailureCache' => []]);
+        $style = json_decode((string)$this->remoteStyleResponse()->getBody(), true, flags: JSON_THROW_ON_ERROR);
+        $style['metadata'] = 'version marker';
+        $cachePath = $this->remoteStyleCachePath();
+        $raw = json_encode($style, JSON_THROW_ON_ERROR);
+        $this->writeCacheFixture($cachePath, $raw);
+        $this->mockUpstream([]);
+        $path = '/map-assets/styles/city-default.json';
+        $cfg = $this->cfg;
+        unset($cfg['styles']['city-default']['attribution']);
+
+        $response = MapboxStyleProxy::handleRequest($cfg, $path);
+        self::assertSame('version marker', json_decode($response->body, true, flags: JSON_THROW_ON_ERROR)['metadata']);
+
+        $this->mockUpstream([new Response(200, ['Content-Type' => 'application/json'], $raw)]);
+        self::assertSame(503, MapboxStyleProxy::handleRequest($this->cfg, $path)->statusCode);
+    }
+
+    public function testOptInStyleResolvesRelativeTileJsonNamedZero(): void
+    {
+        $this->configureRemoteStyle(['upstreamFailureCache' => []]);
+        $style = '{"version":8,"sources":{"directTiles":{"type":"vector","url":"0"}},"layers":[]}';
+        $tileJson = '{"tiles":["https://tiles.example.test/vector/{z}/{x}/{y}.pbf"]}';
+        $mock = $this->mockUpstream([
+            new Response(200, ['Content-Type' => 'application/json'], $style),
+            new Response(200, ['Content-Type' => 'application/json'], $tileJson),
+            new Response(200, ['Content-Type' => 'application/x-protobuf'], 'tile bytes'),
+        ]);
+
+        $response = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/styles/city-default.json');
+        $source = json_decode($response->body, true, flags: JSON_THROW_ON_ERROR)['sources']['directTiles'];
+        self::assertSame('/map-assets/tilejson/city-default/directTiles.json', $source['url']);
+        MapboxStyleProxy::handleRequest($this->cfg, $source['url']);
+        self::assertSame('https://tiles.example.test/vector/0', (string)$mock->getLastRequest()->getUri());
+        $tile = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/tiles/city-default/directTiles/0/1/0/0.pbf');
+        self::assertSame('tile bytes', $tile->body);
+    }
+
+    #[DataProvider('spriteIndexModes')]
+    public function testSpriteIndexAcceptsIntegralJsonNumbers(array $options): void
+    {
+        $this->configureRemoteStyle($options);
+        $index = '{"marker":{"width":32.0,"height":1e1,"x":0,"y":0,"pixelRatio":1}}';
+        $url = 'https://tiles.example.test/vector/sprite';
+        $encoded = rtrim(strtr(base64_encode($url), '+/', '-_'), '=');
+        $this->mockUpstream([new Response(200, ['Content-Type' => 'application/json'], $index)]);
+        $response = MapboxStyleProxy::handleRequest($this->cfg, "/map-assets/sprites/city-default/$encoded.json");
+        self::assertSame($index, $response->body);
+    }
+
+    public static function spriteIndexModes(): array
+    {
+        return ['default' => [[]], 'with validation' => [['upstreamFailureCache' => []]]];
+    }
+
     private function writeWarmRemoteTile(): void
     {
         $cachePath = $this->cacheDir . '/mapbox-style-proxy/city-default/tile/'

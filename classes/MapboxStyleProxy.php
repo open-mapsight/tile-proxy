@@ -86,11 +86,11 @@ class MapboxStyleProxy
             $sourceName = rawurldecode($matches[2]);
             $source = $this->getUpstreamSource($cfg, $styleName, $sourceName);
 
-            if (empty($source['url']) || !is_string($source['url'])) {
+            $styleCfg = self::getStyleCfg($cfg, $styleName);
+            if (!self::hasSourceUrl($source['url'] ?? null, $styleCfg)) {
                 throw new UserException('Source "' . $sourceName . '" does not define a TileJSON URL');
             }
 
-            $styleCfg = self::getStyleCfg($cfg, $styleName);
             $prepared = null;
             $raw = $this->fetchTileJson($cfg, $styleName, $sourceName, $styleCfg, $source, $prepared);
 
@@ -316,7 +316,7 @@ class MapboxStyleProxy
                     continue;
                 }
 
-                if (!empty($source['url']) && is_string($source['url'])) {
+                if (self::hasSourceUrl($source['url'] ?? null, $styleCfg)) {
                     UpstreamUrlPolicy::assertAllowedUpstreamUrl($styleCfg, UpstreamUrlPolicy::resolveUrl($source['url'], $styleUrl));
                     $style['sources'][$sourceName]['url'] = self::publicUrl(
                         $cfg,
@@ -410,8 +410,8 @@ class MapboxStyleProxy
             return array_values($source['tiles'])[$tileIndex];
         }
 
-        if (!empty($source['url']) && is_string($source['url'])) {
-            $styleCfg = self::getStyleCfg($cfg, $styleName);
+        $styleCfg = self::getStyleCfg($cfg, $styleName);
+        if (self::hasSourceUrl($source['url'] ?? null, $styleCfg)) {
             $tileJson = self::decodeJson($this->fetchTileJson($cfg, $styleName, $sourceName, $styleCfg, $source));
             if (empty($tileJson['tiles']) || !is_array($tileJson['tiles']) || !isset(array_values($tileJson['tiles'])[$tileIndex])) {
                 throw new UserException('TileJSON does not define the requested tile template');
@@ -434,7 +434,7 @@ class MapboxStyleProxy
         }
 
         $source = $style['sources'][$sourceName];
-        if (!empty($source['url']) && is_string($source['url'])) {
+        if (self::hasSourceUrl($source['url'] ?? null, $styleCfg)) {
             $source['url'] = UpstreamUrlPolicy::resolveUrl($source['url'], $styleUrl);
         }
 
@@ -451,6 +451,12 @@ class MapboxStyleProxy
     private static function validatesDocuments(array $styleCfg): bool
     {
         return isset($styleCfg['upstreamFailureCache']) || isset($styleCfg['upstreamCircuitBreaker']);
+    }
+
+    private static function hasSourceUrl(mixed $url, array $styleCfg): bool
+    {
+        // Legacy routes treat the string "0" as empty. Validated routes resolve it as a relative URL.
+        return is_string($url) && $url !== '' && ($url !== '0' || self::validatesDocuments($styleCfg));
     }
 
     private function fetchStyle(
@@ -817,7 +823,10 @@ class MapboxStyleProxy
             }
 
             foreach (['x', 'y', 'width', 'height'] as $field) {
-                if (!is_int($sprite->$field ?? null) || $sprite->$field < 0) {
+                $coordinate = $sprite->$field ?? null;
+                $integral = is_int($coordinate)
+                    || (is_float($coordinate) && is_finite($coordinate) && floor($coordinate) === $coordinate);
+                if (!$integral || $coordinate < 0) {
                     return false;
                 }
             }
