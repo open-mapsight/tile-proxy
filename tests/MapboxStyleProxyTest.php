@@ -416,6 +416,7 @@ class MapboxStyleProxyTest extends TestCase
         return [
             'error object' => [200, '{"error":"maintenance"}'],
             'list' => [200, '[{"version":8,"sources":{},"layers":[]}]'],
+            'unusable tile template' => [200, '{"version":8,"sources":{"directTiles":{"tiles":[123]}},"layers":[]}'],
             'partial response' => [206, '{"version":8,"sources":{},"layers":[]}'],
         ];
     }
@@ -428,6 +429,29 @@ class MapboxStyleProxyTest extends TestCase
 
         $response = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/styles/city-default.json');
         self::assertSame(503, $response->statusCode);
+    }
+
+    public function testInvalidTileJsonCannotReplaceTheTemplateUsedByDependentTiles(): void
+    {
+        $this->configureRemoteStyle(['upstreamFailureCache' => ['cacheBrowserTtlFail' => 7]]);
+        $tileJsonUrl = 'https://tiles.example.test/vector/tilejson.json';
+        $tileJsonCache = $this->cacheDir . '/mapbox-style-proxy/city-default/tilejson/' . sha1($tileJsonUrl);
+        $this->writeCacheFixture($this->remoteStyleCachePath(), json_encode([
+            'version' => 8,
+            'sources' => ['directTiles' => ['type' => 'vector', 'url' => $tileJsonUrl]],
+            'layers' => [],
+        ], JSON_THROW_ON_ERROR));
+        $original = '{"tiles":["https://tiles.example.test/vector/{z}/{x}/{y}.pbf"]}';
+        $this->writeCacheFixture($tileJsonCache, $original, 90000);
+        $this->mockUpstream([
+            new Response(200, ['Content-Type' => 'application/json'], '{"tiles":[{"error":"maintenance"}]}'),
+            new Response(200, ['Content-Type' => 'application/x-protobuf'], 'vector bytes'),
+        ]);
+
+        $tile = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/tiles/city-default/directTiles/0/1/0/0.pbf');
+        self::assertSame('vector bytes', $tile->body);
+        self::assertSame(7, $tile->cacheBrowserTtl);
+        self::assertSame($original, file_get_contents($tileJsonCache));
     }
 
     public function testGifWithPngContentTypeDoesNotReplacePngSprite(): void

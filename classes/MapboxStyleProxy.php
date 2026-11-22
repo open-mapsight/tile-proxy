@@ -689,16 +689,37 @@ class MapboxStyleProxy
 
         return match ($cacheKind) {
             'style' => ($json->version ?? null) === 8
-                && ($json->sources ?? null) instanceof stdClass
-                && array_filter((array)$json->sources, 'is_object') === (array)$json->sources
+                && self::hasUsableStyleSources($json->sources ?? null)
                 && is_array($json->layers ?? null)
                 && array_filter($json->layers, 'is_object') === $json->layers
                 && (!isset($json->metadata) || $json->metadata instanceof stdClass),
-            'tilejson' => is_array($json->tiles ?? null)
-                && $json->tiles !== []
-                && array_filter($json->tiles, static fn ($tile) => is_string($tile) && $tile !== '') === $json->tiles,
+            'tilejson' => self::hasTileUrls($json->tiles ?? null),
             'sprite-json' => self::isSpriteIndex($json),
         };
+    }
+
+    private static function hasUsableStyleSources(mixed $sources): bool
+    {
+        if (!$sources instanceof stdClass) {
+            return false;
+        }
+
+        foreach (get_object_vars($sources) as $source) {
+            if (!$source instanceof stdClass
+                || (property_exists($source, 'url') && (!is_string($source->url) || $source->url === ''))
+                || (property_exists($source, 'tiles') && !self::hasTileUrls($source->tiles))
+            ) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static function hasTileUrls(mixed $tiles): bool
+    {
+        return is_array($tiles) && $tiles !== []
+            && array_filter($tiles, static fn ($tile) => is_string($tile) && $tile !== '') === $tiles;
     }
 
     private static function isSpriteIndex(stdClass $json): bool
