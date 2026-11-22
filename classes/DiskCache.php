@@ -9,6 +9,7 @@ class DiskCache
 {
     public static function readFresh(string $path, int $ttlSeconds): ?string
     {
+        clearstatcache(true, $path);
         $mtime = @filemtime($path);
         if ($mtime === false || time() - $mtime > $ttlSeconds) {
             return null;

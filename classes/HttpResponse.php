@@ -13,6 +13,7 @@ class HttpResponse
         public readonly ?int    $cacheBrowserTtl,
         public readonly ?int    $cacheMTime,
         public readonly bool    $notModified = false,
+        public readonly ?int    $statusCode = null,
     )
     {
     }
@@ -55,9 +56,15 @@ class HttpResponse
 
         $time = time();
 
+        if ($response->statusCode !== null) {
+            http_response_code($response->statusCode);
+        }
+
         header('Content-Type: ' . $response->mimeType);
 
-        if ($response->cacheBrowserTtl !== null) {
+        if ($response->statusCode === 503 && $response->cacheBrowserTtl === 0) {
+            header('Cache-Control: no-store');
+        } elseif ($response->cacheBrowserTtl !== null) {
             header('Expires: ' . gmdate('D, d M Y H:i:s', $time + $response->cacheBrowserTtl) . ' GMT');
             header('Cache-Control: public, max-age=' . $response->cacheBrowserTtl);
         }

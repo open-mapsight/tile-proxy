@@ -494,6 +494,23 @@ Generated asset routes use the same base path:
 /map-assets/glyphs/{styleName}/{encodedGlyphTemplate}/{fontstack}/{range}.pbf
 ```
 
+### Mapbox upstream failures
+
+Set `"upstreamFailureCache": {}` on a named style to enable per-asset retry cooldowns. The object accepts
+`cacheServer4xxTtl` (default 3600 seconds), `cacheServer5xxTtl` (default 300 seconds) and
+`cacheBrowserTtlFail` (default 300 seconds). These are non-negative integers. Zero disables the corresponding
+server cooldown or makes stale client responses immediately stale.
+
+A temporary failure serves stale bytes with the shorter browser TTL. The cap also applies when a stale
+style or TileJSON document was used to resolve another asset. If no stale bytes are available, the proxy
+returns HTTP 503 with `Cache-Control: no-store`. Permanent 4xx responses keep the existing stale fallback
+and cold-asset error behavior. Enabled refreshes use a per-asset lock with the root `cacheLockTimeout`.
+If the lock is busy beyond that timeout, the proxy serves stale data or returns 503.
+
+The same [circuit breaker settings](#circuit-breaker) can be enabled on a named style. Assets on the same
+requested origin within that style share a circuit. The breaker can be enabled independently of the
+per-asset cooldowns. Either option validates fetched JSON and sprite images before caching them.
+
 ### Web fonts for OpenLayers
 
 OpenLayers/ol-mapbox-style uses CSS fonts, **not** the style's PBF `glyphs`. Without a separate
