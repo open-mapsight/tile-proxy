@@ -505,7 +505,7 @@ class MapboxStyleProxyTest extends TestCase
         self::assertSame($working, MapboxStyleProxy::handleRequest($this->cfg, $stylePath)->body);
         self::assertSame($original, file_get_contents($cachePath));
 
-        if ($options === []) {
+        if (!isset($options['upstreamFailureCache'])) {
             $mock->append($invalid);
         }
         $mock->append(new Response(200, ['Content-Type' => 'application/x-protobuf'], 'tile bytes'));
@@ -561,21 +561,15 @@ class MapboxStyleProxyTest extends TestCase
             unlink($cachePath . '.failure.json');
         }
         $mock->append(new Response(200, ['Content-Type' => 'text/css'], $bad));
-        if ($options === []) {
-            $this->expectException(UserException::class);
-            $this->expectExceptionMessage('Configured Fontsource subset is missing: latin');
-            MapboxStyleProxy::handleRequest($this->cfg, $path);
-        } else {
-            self::assertSame(503, MapboxStyleProxy::handleRequest($this->cfg, $path)->statusCode);
-            self::assertCount(0, $mock, 'The proxy tried a refresh before returning the cold failure');
-        }
+        self::assertSame(503, MapboxStyleProxy::handleRequest($this->cfg, $path)->statusCode);
+        self::assertCount(0, $mock, 'The proxy tried a refresh before returning the cold failure');
     }
 
     public static function refreshModes(): array
     {
         return [
-            'default' => [[]],
             'with cooldown' => [['upstreamFailureCache' => []]],
+            'with breaker' => [['upstreamCircuitBreaker' => []]],
         ];
     }
 
@@ -603,6 +597,103 @@ class MapboxStyleProxyTest extends TestCase
         $updated = json_decode(file_get_contents($statePath), true, flags: JSON_THROW_ON_ERROR);
         self::assertGreaterThan(time(), $updated['openUntil']);
         self::assertNotSame($state['generation'], $updated['generation']);
+    }
+
+    #[DataProvider('legacyMetadata')]
+    public function testDefaultPathServesStylesAndWarmTilesWithWildcardMetadata(mixed $metadata): void
+    {
+        $this->configureRemoteStyle([]);
+        unset($this->cfg['styles']['city-default']['attribution']);
+        $style = json_decode((string)$this->remoteStyleResponse()->getBody(), true, flags: JSON_THROW_ON_ERROR);
+        $style['metadata'] = $metadata;
+        $this->writeCacheFixture($this->remoteStyleCachePath(), json_encode($style, JSON_THROW_ON_ERROR));
+        $this->writeWarmRemoteTile();
+        $this->mockUpstream([]);
+
+        $response = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/styles/city-default.json');
+        self::assertSame($metadata, json_decode($response->body, true, flags: JSON_THROW_ON_ERROR)['metadata']);
+        $tile = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/tiles/city-default/directTiles/0/1/0/0.pbf');
+        self::assertSame('cached tile', $tile->body);
+    }
+
+    public static function legacyMetadata(): array
+    {
+        return ['scalar' => ['v17'], 'list' => [['archive', '2026']]];
+    }
+
+    public function testDefaultWarmTileIgnoresAnUnrelatedDisallowedSource(): void
+    {
+        $this->configureRemoteStyle([]);
+        $style = json_decode((string)$this->remoteStyleResponse()->getBody(), true, flags: JSON_THROW_ON_ERROR);
+        $style['sources']['unrelated'] = ['type' => 'vector', 'url' => 'mapbox://other.tiles'];
+        $this->writeCacheFixture($this->remoteStyleCachePath(), json_encode($style, JSON_THROW_ON_ERROR));
+        $this->writeWarmRemoteTile();
+        $this->mockUpstream([]);
+
+        try {
+            MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/styles/city-default.json');
+            self::fail('The full style route must still apply the existing URL policy');
+        } catch (UserException $error) {
+            self::assertSame('Upstream URL is not allowed', $error->getMessage());
+        }
+
+        $tile = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/tiles/city-default/directTiles/0/1/0/0.pbf');
+        self::assertSame('cached tile', $tile->body);
+    }
+
+    public function testHalfOpenStyleProbeMustSerializeBeforeReplacingBytesOrClosingCircuit(): void
+    {
+        $this->configureRemoteStyle(['upstreamCircuitBreaker' => ['failureThreshold' => 1]]);
+        $original = (string)$this->remoteStyleResponse()->getBody();
+        $cachePath = $this->remoteStyleCachePath();
+        $this->writeCacheFixture($cachePath, $original);
+        $path = '/map-assets/styles/city-default.json';
+        $expected = MapboxStyleProxy::handleRequest($this->cfg, $path)->body;
+        touch($cachePath, time() - 90000);
+
+        $mock = $this->mockUpstream([new Response(503)]);
+        self::assertSame($expected, MapboxStyleProxy::handleRequest($this->cfg, $path)->body);
+        [$statePath] = glob($this->cacheDir . '/.upstream-circuits/*.json');
+        $state = json_decode(file_get_contents($statePath), true, flags: JSON_THROW_ON_ERROR);
+        $state['openUntil'] = time() - 1;
+        file_put_contents($statePath, json_encode($state, JSON_THROW_ON_ERROR));
+        $mock->append(new Response(200, ['Content-Type' => 'application/json'],
+            substr($original, 0, -1) . ',"extension":1e400}'));
+
+        self::assertSame($expected, MapboxStyleProxy::handleRequest($this->cfg, $path)->body);
+        self::assertSame($original, file_get_contents($cachePath));
+        $updated = json_decode(file_get_contents($statePath), true, flags: JSON_THROW_ON_ERROR);
+        self::assertGreaterThan(time(), $updated['openUntil']);
+        self::assertNotSame($state['generation'], $updated['generation']);
+        self::assertSame($expected, MapboxStyleProxy::handleRequest($this->cfg, $path)->body);
+    }
+
+    public function testTileJsonRefreshMustSerializeBeforeReplacingWorkingBytes(): void
+    {
+        $this->configureRemoteStyle(['upstreamFailureCache' => ['cacheBrowserTtlFail' => 7]]);
+        $url = 'https://tiles.example.test/vector/source.json';
+        $this->writeCacheFixture($this->remoteStyleCachePath(),
+            '{"version":8,"sources":{"directTiles":{"type":"vector","url":"' . $url . '"}},"layers":[]}');
+        $path = '/map-assets/tilejson/city-default/directTiles.json';
+        $cachePath = $this->cacheDir . '/mapbox-style-proxy/city-default/tilejson/' . sha1($url);
+        $original = '{"tiles":["https://tiles.example.test/vector/{z}/{x}/{y}.pbf"]}';
+        $this->writeCacheFixture($cachePath, $original);
+        $expected = MapboxStyleProxy::handleRequest($this->cfg, $path)->body;
+        touch($cachePath, time() - 90000);
+
+        $this->mockUpstream([new Response(200, ['Content-Type' => 'application/json'],
+            substr($original, 0, -1) . ',"extension":1e400}')]);
+        $response = MapboxStyleProxy::handleRequest($this->cfg, $path);
+        self::assertSame($expected, $response->body);
+        self::assertSame(7, $response->cacheBrowserTtl);
+        self::assertSame($original, file_get_contents($cachePath));
+    }
+
+    private function writeWarmRemoteTile(): void
+    {
+        $cachePath = $this->cacheDir . '/mapbox-style-proxy/city-default/tile/'
+            . sha1('https://tiles.example.test/vector/1/0/0.pbf');
+        $this->writeCacheFixture($cachePath, 'cached tile');
     }
 
     private function remoteStyleCachePath(): string

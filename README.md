@@ -551,13 +551,14 @@ The same [circuit breaker settings](#circuit-breaker) can be enabled on a named 
 requested origin within that style share a circuit. The breaker can be enabled independently of the
 per-asset cooldowns.
 
-All Mapbox configurations validate refreshes and existing cache entries before serving them. A refresh
-must be HTTP 200 with a usable body. The proxy checks style and TileJSON structure and applies the
-same URL policy and rewrites used by the routes. Vector sources need usable tile templates or a TileJSON
-URL. Sprite indexes and PNGs must have the expected structure and format. Fontsource CSS must contain
-the configured faces and subsets. A rejected refresh leaves usable stale bytes in place. If less restrictive
-rules in an older version allowed an unusable cache entry, it is treated as a miss. Cooldowns, breakers
-and their response policies remain opt-in.
+Styles with a circuit breaker or per-asset failure cache validate refreshes and existing cache entries.
+A refresh must be HTTP 200 with a usable body. Style and TileJSON references must pass the same policy
+and rewrites used by the routes, and the resulting documents must serialize successfully. Vector sources
+need usable tile templates or a TileJSON URL. Sprite indexes and PNGs must have the expected structure
+and format. Fontsource CSS must contain the configured faces and subsets. A rejected refresh leaves
+usable stale bytes in place. Unusable cached entries are treated as misses. The vector 404 policy by itself
+applies only to tile responses. With these options omitted, Mapbox retains its existing per-route checks
+and warm cache path.
 
 ### Web fonts for OpenLayers
 

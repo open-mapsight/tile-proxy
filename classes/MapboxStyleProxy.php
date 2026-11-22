@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OpenMapsight\TileProxy;
 
 use InvalidArgumentException;
+use JsonException;
 use RuntimeException;
 use stdClass;
 
@@ -68,14 +69,14 @@ class MapboxStyleProxy
 
         if (preg_match('#^styles/([^/]+)\.json$#', $routePath, $matches) === 1) {
             $styleName = rawurldecode($matches[1]);
-            $style = $this->loadUpstreamStyle($cfg, $styleName);
-            $style = MapboxStyleTransforms::apply($style, self::getStyleCfg($cfg, $styleName));
-            $style = self::rewriteStyle($cfg, $styleName, $style);
+            $styleCfg = self::getStyleCfg($cfg, $styleName);
+            $prepared = null;
+            $raw = $this->fetchStyle($cfg, $styleName, $styleCfg, $prepared);
 
             return new HttpResponse(
-                json_encode($style, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+                $prepared ?? self::serializeStyle($cfg, $styleName, $styleCfg, self::decodeJson($raw)),
                 'application/json',
-                self::getCacheTtl(self::getStyleCfg($cfg, $styleName), 'style'),
+                self::getCacheTtl($styleCfg, 'style'),
                 null
             );
         }
@@ -90,15 +91,11 @@ class MapboxStyleProxy
             }
 
             $styleCfg = self::getStyleCfg($cfg, $styleName);
-            $tileJsonUrl = $source['url'];
-            $tileJson = $this->loadTileJson($cfg, $styleName, $sourceName, $styleCfg, $tileJsonUrl);
-            if (isset($source['attribution']) && is_string($source['attribution'])) {
-                $tileJson['attribution'] = $source['attribution'];
-            }
-            $tileJson = self::rewriteTileJson($cfg, $styleName, $sourceName, $tileJson, $tileJsonUrl);
+            $prepared = null;
+            $raw = $this->fetchTileJson($cfg, $styleName, $sourceName, $styleCfg, $source, $prepared);
 
             return new HttpResponse(
-                json_encode($tileJson, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+                $prepared ?? self::serializeTileJson($cfg, $styleName, $sourceName, $source, self::decodeJson($raw)),
                 'application/json',
                 self::getCacheTtl($styleCfg, 'tilejson'),
                 null
@@ -415,7 +412,7 @@ class MapboxStyleProxy
 
         if (!empty($source['url']) && is_string($source['url'])) {
             $styleCfg = self::getStyleCfg($cfg, $styleName);
-            $tileJson = $this->loadTileJson($cfg, $styleName, $sourceName, $styleCfg, $source['url']);
+            $tileJson = self::decodeJson($this->fetchTileJson($cfg, $styleName, $sourceName, $styleCfg, $source));
             if (empty($tileJson['tiles']) || !is_array($tileJson['tiles']) || !isset(array_values($tileJson['tiles'])[$tileIndex])) {
                 throw new UserException('TileJSON does not define the requested tile template');
             }
@@ -428,8 +425,8 @@ class MapboxStyleProxy
 
     private function getUpstreamSource(array $cfg, string $styleName, string $sourceName): array
     {
-        $style = $this->loadUpstreamStyle($cfg, $styleName);
         $styleCfg = self::getStyleCfg($cfg, $styleName);
+        $style = self::decodeJson($this->fetchStyle($cfg, $styleName, $styleCfg));
         $styleUrl = self::getUpstreamStyleUrl($styleCfg, $styleName);
 
         if (empty($style['sources'][$sourceName]) || !is_array($style['sources'][$sourceName])) {
@@ -451,32 +448,71 @@ class MapboxStyleProxy
         return $source;
     }
 
-    private function loadUpstreamStyle(array $cfg, string $styleName): array
+    private static function validatesDocuments(array $styleCfg): bool
     {
-        $styleCfg = self::getStyleCfg($cfg, $styleName);
-        $styleUrl = self::getUpstreamStyleUrl($styleCfg, $styleName);
-
-        self::getTileBounds($styleCfg);
-        $validate = static function (string $body) use ($cfg, $styleName, $styleCfg): void {
-            $style = MapboxStyleTransforms::apply(self::decodeJson($body), $styleCfg);
-            self::rewriteStyle($cfg, $styleName, $style);
-        };
-
-        return self::decodeJson($this->fetchWithCache($cfg, $styleName, $styleCfg, 'style', $styleUrl, $validate));
+        return isset($styleCfg['upstreamFailureCache']) || isset($styleCfg['upstreamCircuitBreaker']);
     }
 
-    private function loadTileJson(
+    private function fetchStyle(
+        array $cfg,
+        string $styleName,
+        array $styleCfg,
+        ?string &$prepared = null,
+    ): string {
+        $url = self::getUpstreamStyleUrl($styleCfg, $styleName);
+        $prepare = null;
+        if (self::validatesDocuments($styleCfg)) {
+            self::getTileBounds($styleCfg);
+            $prepare = static function (string $body) use ($cfg, $styleName, $styleCfg, &$prepared): void {
+                $style = self::decodeJson($body);
+                $writesMetadata = isset($styleCfg['attribution']) || ($styleCfg['olWebfonts'] ?? false) === true;
+                if ($writesMetadata && isset($style['metadata']) && !is_array($style['metadata'])) {
+                    throw new UserException('Style metadata must support keyed writes for the configured rewrite');
+                }
+                $prepared = self::serializeStyle($cfg, $styleName, $styleCfg, $style);
+            };
+        }
+
+        return $this->fetchWithCache($cfg, $styleName, $styleCfg, 'style', $url, $prepare);
+    }
+
+    private static function serializeStyle(array $cfg, string $styleName, array $styleCfg, array $style): string
+    {
+        $style = MapboxStyleTransforms::apply($style, $styleCfg);
+        return json_encode(self::rewriteStyle($cfg, $styleName, $style), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+    }
+
+    private function fetchTileJson(
         array $cfg,
         string $styleName,
         string $sourceName,
         array $styleCfg,
-        string $url,
-    ): array {
-        $validate = static function (string $body) use ($cfg, $styleName, $sourceName, $url): void {
-            self::rewriteTileJson($cfg, $styleName, $sourceName, self::decodeJson($body), $url);
-        };
+        array $source,
+        ?string &$prepared = null,
+    ): string {
+        $prepare = null;
+        if (self::validatesDocuments($styleCfg)) {
+            $prepare = static function (string $body) use ($cfg, $styleName, $sourceName, $source, &$prepared): void {
+                $prepared = self::serializeTileJson($cfg, $styleName, $sourceName, $source, self::decodeJson($body));
+            };
+        }
 
-        return self::decodeJson($this->fetchWithCache($cfg, $styleName, $styleCfg, 'tilejson', $url, $validate));
+        return $this->fetchWithCache($cfg, $styleName, $styleCfg, 'tilejson', $source['url'], $prepare);
+    }
+
+    private static function serializeTileJson(
+        array $cfg,
+        string $styleName,
+        string $sourceName,
+        array $source,
+        array $tileJson,
+    ): string {
+        if (isset($source['attribution']) && is_string($source['attribution'])) {
+            $tileJson['attribution'] = $source['attribution'];
+        }
+
+        $rewritten = self::rewriteTileJson($cfg, $styleName, $sourceName, $tileJson, $source['url']);
+        return json_encode($rewritten, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     }
 
     private static function getUpstreamStyleUrl(array $styleCfg, string $styleName): string
@@ -504,6 +540,21 @@ class MapboxStyleProxy
         $breakerConfig = $styleCfg['upstreamCircuitBreaker'] ?? null;
         $resilienceEnabled = $failureConfig !== null || $breakerConfig !== null;
         $notFound = $resourceType === 'tile' ? TileNotFoundPolicy::fromConfig($styleCfg) : null;
+        $cached = DiskCache::readFresh($cachePath, $cacheTtl);
+        if (!$resilienceEnabled && $notFound === null) {
+            if ($cached !== null) {
+                return $cached;
+            }
+
+            $result = self::fetchAsset($cfg, $styleCfg, $resourceType, $upstreamUrl);
+            if ($result->isSuccess()) {
+                DiskCache::write($cachePath, $result->body);
+                return $result->body;
+            }
+
+            return DiskCache::read($cachePath) ?? throw new UserException('Could not fetch upstream map asset');
+        }
+
         $cacheKind = self::cacheKind($resourceType, $upstreamUrl);
         $validationError = static function (string $body) use ($cacheKind, $validate): ?string {
             if (!self::isUsableAsset($body, $cacheKind)) {
@@ -515,7 +566,7 @@ class MapboxStyleProxy
                     $validate($body);
                 }
                 return null;
-            } catch (RuntimeException $error) {
+            } catch (JsonException|RuntimeException $error) {
                 return $error->getMessage();
             }
         };
@@ -524,25 +575,8 @@ class MapboxStyleProxy
             $cfg['upstreamHttp'] = UpstreamCircuitBreaker::withHttpTimeout($upstreamUrl, $cfg['upstreamHttp'] ?? []);
         }
         $fetch = static fn () => self::fetchAsset($cfg, $styleCfg, $resourceType, $upstreamUrl, $validationError);
-        $cached = DiskCache::readFresh($cachePath, $cacheTtl);
         if ($cached !== null && $validationError($cached) === null) {
             return $cached;
-        }
-
-        if (!$resilienceEnabled && $notFound === null) {
-            $result = $fetch();
-            if ($result->isSuccess()) {
-                self::writeCacheBestEffort($cachePath, $result->body, $resourceType);
-                return $result->body;
-            }
-
-            $stale = DiskCache::read($cachePath);
-            if ($stale !== null && $validationError($stale) === null) {
-                return $stale;
-            }
-
-            $reason = !$result->transportFailed && !$result->contentTypeMismatch ? $result->error : null;
-            throw new UserException($reason ?? 'Could not fetch upstream map asset');
         }
 
         if ($failureConfig !== null && !is_array($failureConfig)) {
@@ -683,7 +717,7 @@ class MapboxStyleProxy
         array $styleCfg,
         string $resourceType,
         string $url,
-        callable $validationError,
+        ?callable $validationError = null,
     ): UpstreamFetchResult {
         $expectedContentType = self::expectedContentTypeFor($resourceType, $url);
         $result = UpstreamFetcher::fetch(
@@ -694,7 +728,7 @@ class MapboxStyleProxy
             self::alternateContentTypesFor($cfg, $styleCfg, $resourceType)
         );
 
-        if ($result->isSuccess()) {
+        if ($validationError !== null && $result->isSuccess()) {
             $error = $result->statusCode === 200 ? $validationError($result->body) : 'Unexpected upstream map asset status';
             if ($error !== null) {
                 Log::warning('Upstream map asset response is unusable', ['resourceType' => $resourceType]);
@@ -736,8 +770,7 @@ class MapboxStyleProxy
             'style' => in_array($json->version ?? null, [8, 8.0], true)
                 && self::hasUsableStyleSources($json->sources ?? null)
                 && is_array($json->layers ?? null)
-                && array_filter($json->layers, self::isUsableStyleLayer(...)) === $json->layers
-                && (!isset($json->metadata) || $json->metadata instanceof stdClass),
+                && array_filter($json->layers, self::isUsableStyleLayer(...)) === $json->layers,
             'tilejson' => self::hasTileUrls($json->tiles ?? null),
             'sprite-json' => self::isSpriteIndex($json),
         };
