@@ -417,8 +417,19 @@ class MapboxStyleProxyTest extends TestCase
             'error object' => [200, '{"error":"maintenance"}'],
             'list' => [200, '[{"version":8,"sources":{},"layers":[]}]'],
             'unusable tile template' => [200, '{"version":8,"sources":{"directTiles":{"tiles":[123]}},"layers":[]}'],
+            'vector source without tiles or URL' => [200, '{"version":8,"sources":{"directTiles":{"type":"vector"}},"layers":[]}'],
+            'string version' => [200, '{"version":"8","sources":{},"layers":[]}'],
             'partial response' => [206, '{"version":8,"sources":{},"layers":[]}'],
         ];
+    }
+
+    public function testNumericFloatingPointStyleVersionIsAccepted(): void
+    {
+        $this->configureRemoteStyle(['upstreamFailureCache' => []]);
+        $this->mockUpstream([
+            new Response(200, ['Content-Type' => 'application/json'], '{"version":8.0,"sources":{},"layers":[]}'),
+        ]);
+        self::assertSame('application/json', MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/styles/city-default.json')->mimeType);
     }
 
     public function testExistingMalformedStyleCacheIsIgnoredEvenWhenFresh(): void
@@ -474,6 +485,120 @@ class MapboxStyleProxyTest extends TestCase
         self::assertSame($png, $stale->body);
         self::assertSame(7, $stale->cacheBrowserTtl);
         self::assertSame($png, file_get_contents($cachePath));
+    }
+
+    #[DataProvider('refreshModes')]
+    public function testStyleRefreshCannotReplaceWorkingRouteWithDisallowedTemplate(array $options): void
+    {
+        $this->configureRemoteStyle($options);
+        $stylePath = '/map-assets/styles/city-default.json';
+        $tilePath = '/map-assets/tiles/city-default/directTiles/0/1/0/0.pbf';
+        $cachePath = $this->remoteStyleCachePath();
+        $original = (string)$this->remoteStyleResponse()->getBody();
+        $mock = $this->mockUpstream([$this->remoteStyleResponse()]);
+        $working = MapboxStyleProxy::handleRequest($this->cfg, $stylePath)->body;
+        touch($cachePath, time() - 90000);
+
+        $invalid = new Response(200, ['Content-Type' => 'application/json'],
+            str_replace('tiles.example.test', 'blocked.example.test', $original));
+        $mock->append($invalid);
+        self::assertSame($working, MapboxStyleProxy::handleRequest($this->cfg, $stylePath)->body);
+        self::assertSame($original, file_get_contents($cachePath));
+
+        if ($options === []) {
+            $mock->append($invalid);
+        }
+        $mock->append(new Response(200, ['Content-Type' => 'application/x-protobuf'], 'tile bytes'));
+        self::assertSame('tile bytes', MapboxStyleProxy::handleRequest($this->cfg, $tilePath)->body);
+    }
+
+    #[DataProvider('refreshModes')]
+    public function testTileJsonRefreshCannotReplaceWorkingRouteWithDisallowedTemplate(array $options): void
+    {
+        $this->configureRemoteStyle($options);
+        $upstream = 'https://tiles.example.test/vector/source.json';
+        $this->writeCacheFixture($this->remoteStyleCachePath(),
+            '{"version":8,"sources":{"directTiles":{"type":"vector","url":"' . $upstream . '"}},"layers":[]}');
+        $cachePath = $this->cacheDir . '/mapbox-style-proxy/city-default/tilejson/' . sha1($upstream);
+        $original = '{"tiles":["https://tiles.example.test/vector/{z}/{x}/{y}.pbf"]}';
+        $this->writeCacheFixture($cachePath, $original, 90000);
+
+        $this->mockUpstream([
+            new Response(200, ['Content-Type' => 'application/json'],
+                str_replace('tiles.example.test', 'blocked.example.test', $original)),
+            new Response(200, ['Content-Type' => 'application/x-protobuf'], 'tile bytes'),
+        ]);
+        $response = MapboxStyleProxy::handleRequest($this->cfg, '/map-assets/tiles/city-default/directTiles/0/1/0/0.pbf');
+        self::assertSame('tile bytes', $response->body);
+        self::assertSame($original, file_get_contents($cachePath));
+    }
+
+    #[DataProvider('refreshModes')]
+    public function testFontCssRefreshKeepsConfiguredSubsetsAndIgnoresBadCachedCss(array $options): void
+    {
+        $this->configureRemoteStyle($options);
+        $this->cfg['styles']['city-default']['webfonts'] = ['ubuntu' => [
+            'version' => '5.2.8', 'faces' => ['400'], 'subsets' => ['latin'],
+        ]];
+        $this->cfg['styles']['city-default']['allowedHosts'][] = 'cdn.jsdelivr.net';
+        $this->cfg['styles']['city-default']['allowedPathPrefixes'][] = '/npm/@fontsource/ubuntu@5.2.8/';
+        $upstream = 'https://cdn.jsdelivr.net/npm/@fontsource/ubuntu@5.2.8/400.css';
+        $cachePath = $this->cacheDir . '/mapbox-style-proxy/city-default/font-css/' . sha1($upstream);
+        $original = "@font-face { font-family: Ubuntu; src: url(./files/ubuntu-latin-400-normal.woff2) format('woff2'); }";
+        $bad = '/* no configured faces */';
+        $path = '/map-assets/fonts/city-default/ubuntu/400.css';
+        $this->writeCacheFixture($cachePath, $original, 3000000);
+        $mock = $this->mockUpstream([
+            new Response(200, ['Content-Type' => 'text/css'], $bad),
+        ]);
+        $stale = MapboxStyleProxy::handleRequest($this->cfg, $path);
+        self::assertStringContainsString('/map-assets/fonts/city-default/ubuntu/latin-400-normal.woff2', $stale->body);
+        self::assertSame($original, file_get_contents($cachePath));
+
+        // A previously cached comment must not be served, even while its mtime is fresh.
+        $this->writeCacheFixture($cachePath, $bad);
+        $mock->append(new Response(200, ['Content-Type' => 'text/css'], $bad));
+        if ($options === []) {
+            $this->expectException(UserException::class);
+            $this->expectExceptionMessage('Configured Fontsource subset is missing: latin');
+            MapboxStyleProxy::handleRequest($this->cfg, $path);
+        } else {
+            self::assertSame(503, MapboxStyleProxy::handleRequest($this->cfg, $path)->statusCode);
+        }
+    }
+
+    public static function refreshModes(): array
+    {
+        return [
+            'default' => [[]],
+            'with cooldown' => [['upstreamFailureCache' => []]],
+        ];
+    }
+
+    public function testRejectedHalfOpenStyleProbeKeepsTheOldRouteAndReopensTheCircuit(): void
+    {
+        $this->configureRemoteStyle(['upstreamCircuitBreaker' => ['failureThreshold' => 1]]);
+        $original = (string)$this->remoteStyleResponse()->getBody();
+        $this->writeCacheFixture($this->remoteStyleCachePath(), $original, 90000);
+        $tileCache = $this->cacheDir . '/mapbox-style-proxy/city-default/tile/'
+            . sha1('https://tiles.example.test/vector/1/0/0.pbf');
+        $this->writeCacheFixture($tileCache, 'cached tile');
+        $mock = $this->mockUpstream([new Response(503)]);
+        $path = '/map-assets/tiles/city-default/directTiles/0/1/0/0.pbf';
+        self::assertSame('cached tile', MapboxStyleProxy::handleRequest($this->cfg, $path)->body);
+
+        [$statePath] = glob($this->cacheDir . '/.upstream-circuits/*.json');
+        $state = json_decode(file_get_contents($statePath), true, flags: JSON_THROW_ON_ERROR);
+        $state['openUntil'] = time() - 1;
+        file_put_contents($statePath, json_encode($state, JSON_THROW_ON_ERROR));
+        $mock->append(new Response(200, ['Content-Type' => 'application/json'],
+            str_replace('tiles.example.test', 'blocked.example.test', $original)));
+
+        self::assertSame('cached tile', MapboxStyleProxy::handleRequest($this->cfg, $path)->body);
+        self::assertSame($original, file_get_contents($this->remoteStyleCachePath()));
+        $updated = json_decode(file_get_contents($statePath), true, flags: JSON_THROW_ON_ERROR);
+        self::assertGreaterThan(time(), $updated['openUntil']);
+        self::assertNotSame($state['generation'], $updated['generation']);
     }
 
     private function remoteStyleCachePath(): string
@@ -572,11 +697,11 @@ class MapboxStyleProxyTest extends TestCase
         $spriteJsonPath = $style['sprite'] . '.json';
         $spriteJsonResponse = MapboxStyleProxy::handleRequest($this->cfg, $spriteJsonPath);
         $this->assertSame('application/json', $spriteJsonResponse->mimeType);
-        $this->assertSame('{"sprite":true}', $spriteJsonResponse->body);
+        $this->assertSame('{"sprite":{"x":0,"y":0,"width":1,"height":1}}', $spriteJsonResponse->body);
 
         $spritePngResponse = MapboxStyleProxy::handleRequest($this->cfg, $style['sprite'] . '.png');
         $this->assertSame('image/png', $spritePngResponse->mimeType);
-        $this->assertSame('png bytes', $spritePngResponse->body);
+        $this->assertSame(file_get_contents($this->assetDir . '/sprites/city_sprite.png'), $spritePngResponse->body);
 
         $glyphPath = str_replace(
             ['{fontstack}', '{range}'],
@@ -625,8 +750,8 @@ class MapboxStyleProxyTest extends TestCase
         mkdir($this->assetDir . '/fonts/Open Sans Regular', 0777, true);
 
         file_put_contents($this->assetDir . '/tiles/12/2200/1340.pbf', 'vector tile bytes');
-        file_put_contents($this->assetDir . '/sprites/city_sprite.json', '{"sprite":true}');
-        file_put_contents($this->assetDir . '/sprites/city_sprite.png', 'png bytes');
+        file_put_contents($this->assetDir . '/sprites/city_sprite.json', '{"sprite":{"x":0,"y":0,"width":1,"height":1}}');
+        imagepng(imagecreatetruecolor(1, 1), $this->assetDir . '/sprites/city_sprite.png');
         file_put_contents($this->assetDir . '/fonts/Open Sans Regular/0-255.pbf', 'glyph bytes');
         file_put_contents($this->assetDir . '/tilejson/source.json', json_encode([
             'tilejson' => '3.0.0',

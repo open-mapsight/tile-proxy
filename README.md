@@ -542,10 +542,15 @@ workers for that cache stopped.
 
 The same [circuit breaker settings](#circuit-breaker) can be enabled on a named style. Assets on the same
 requested origin within that style share a circuit. The breaker can be enabled independently of the
-per-asset cooldowns. Either option checks newly fetched and existing cached assets before serving them.
-Style JSON must have a version 8 object with sources and layers, TileJSON must have tile URL strings,
-and sprite indexes and PNGs must have the expected structure and image format. These checks cover the
-fields used by the proxy.
+per-asset cooldowns.
+
+All Mapbox configurations validate refreshes and existing cache entries before serving them. A refresh
+must be HTTP 200 with a usable body. The proxy checks style and TileJSON structure and applies the
+same URL policy and rewrites used by the routes. Vector sources need usable tile templates or a TileJSON
+URL. Sprite indexes and PNGs must have the expected structure and format. Fontsource CSS must contain
+the configured faces and subsets. A rejected refresh leaves usable stale bytes in place. If less restrictive
+rules in an older version allowed an unusable cache entry, it is treated as a miss. Cooldowns, breakers
+and their response policies remain opt-in.
 
 ### Web fonts for OpenLayers
 
