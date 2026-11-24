@@ -17,6 +17,8 @@ class ProxyTest extends TestCase
         ];
 
         $this->assertTrue(Proxy::isMapboxAssetRequest($cfg, '/map-assets/styles/city-default.json'));
+        $this->assertTrue(Proxy::isMapboxAssetRequest($cfg, '/map-assets/fonts/city-default/ubuntu/400.css'));
+        $this->assertTrue(Proxy::isMapboxAssetRequest($cfg, '/map-assets/fonts/city-default/ubuntu/latin-400-normal.woff2'));
         $this->assertTrue(Proxy::isMapboxAssetRequest($cfg, '/map-assets/tiles/city-default/source/0/0/0/0.pbf'));
         $this->assertFalse(Proxy::isMapboxAssetRequest($cfg, '/tiles?x=0&y=0&z=0'));
         $this->assertFalse(Proxy::isMapboxAssetRequest($cfg, '/other/styles/city-default.json'));

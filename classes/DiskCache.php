@@ -3,10 +3,13 @@ declare(strict_types=1);
 
 namespace OpenMapsight\TileProxy;
 
+use RuntimeException;
+
 class DiskCache
 {
     public static function readFresh(string $path, int $ttlSeconds): ?string
     {
+        clearstatcache(true, $path);
         $mtime = @filemtime($path);
         if ($mtime === false || time() - $mtime > $ttlSeconds) {
             return null;
@@ -28,5 +31,33 @@ class DiskCache
     public static function write(string $path, string $data): void
     {
         Utils::writeToFile($path, $data);
+    }
+
+    /** @internal */
+    public static function writeAtomically(string $path, string $data): void
+    {
+        $directory = dirname($path);
+        Utils::mkdirp($directory);
+        $temp = $directory . '/.write-' . bin2hex(random_bytes(16));
+        $stream = @fopen($temp, 'xb');
+        if ($stream === false) {
+            throw new RuntimeException('Could not create temporary cache file in "' . $directory . '"');
+        }
+
+        try {
+            $written = @fwrite($stream, $data);
+            $closed = @fclose($stream);
+            if ($written !== strlen($data) || !$closed || !@rename($temp, $path)) {
+                throw new RuntimeException('Could not replace cache file "' . $path . '"');
+            }
+        } finally {
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+            if (is_file($temp)) {
+                @unlink($temp);
+            }
+        }
+        clearstatcache(true, $path);
     }
 }

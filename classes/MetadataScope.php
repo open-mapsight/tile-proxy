@@ -14,6 +14,12 @@ class MetadataScope
         Metadata::save($self->getRootMetadata());
     }
 
+    /** @internal */
+    public function getCacheRoot(): ?string
+    {
+        return $this->getRootMetadata()->getCacheRoot();
+    }
+
     private function getRootMetadata(): Metadata
     {
         $ref = $this->ref;
@@ -53,6 +59,22 @@ class MetadataScope
     public function setLast4xx(int $timestamp): void
     {
         $this->__set('last4xx', $timestamp);
+    }
+
+    public function getLast404(): ?int
+    {
+        $value = $this->__get('last404');
+        return is_int($value) ? $value : null;
+    }
+
+    public function setLast404(int $timestamp): void
+    {
+        $this->__set('last404', $timestamp);
+    }
+
+    public function clearLast404(): void
+    {
+        $this->__unset('last404');
     }
 
     public function getLast5xx(): ?int

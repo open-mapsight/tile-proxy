@@ -9,7 +9,8 @@ You can initialize the proxy by providing a configuration array or by pointing t
 ### Initialization
 
 Use `Proxy` when a single config serves both raster tile pipelines and Mapbox style assets. It routes style asset
-requests under `mapAssetBasePath` to `MapboxStyleProxy` and everything else with an `ops` pipeline to `Base`.
+requests under `mapAssetBasePath`, including fonts, to `MapboxStyleProxy` and everything else with an `ops`
+pipeline to `Base`.
 
 #### Combined or JSONC configuration
 ```php
@@ -52,8 +53,9 @@ sending output.
 The configuration defines the behavior of the proxy.
 
 * `cacheServerPath`: Base directory for caching tiles and map assets.
-* `cacheLockTimeout`: (Raster tiles, optional) Maximum seconds to wait for a tile's exclusive cache lock.
-  Defaults to `2.85` for compatibility; set it above the full upstream fetch and processing budget.
+* `cacheLockTimeout`: (Optional) Maximum seconds to wait for a raster tile lock or an opt-in Mapbox
+  asset refresh lock. Defaults to `2.85` seconds. For raster tiles, set it above the full upstream fetch
+  and processing budget.
 * `ops`: (Raster tiles) Operation pipeline for bitmap tile requests.
 * `mapAssetBasePath`: (Mapbox styles) URL path prefix for proxied style JSON, vector tiles, sprites, and glyphs.
 * `styles`: (Mapbox styles) Named style configurations for `MapboxStyleProxy`.
@@ -154,6 +156,56 @@ to be a known image format, and formats this GD build can read must also decode.
 
 A tile assembled without one of its layers is sent with the shorter failure TTL, so browsers ask again
 soon. A `merge` op accepts its own `cacheBrowserTtlFail` (default 300 s) for when its sub-pipeline throws.
+
+#### Circuit breaker
+
+Set `"upstreamCircuitBreaker": {}` on a raster source to skip requests across cold tiles when its upstream
+is failing. The object accepts three positive integer settings: `failureThreshold` (default 5),
+`failureWindow` (default 30 seconds), and `openTtl` (default 30 seconds). The window starts at the first
+temporary failure and counts failures even if other requests succeed during it. Permanent 4xx responses
+do not count. An open circuit follows the temporary-failure fallback without starting a per-tile cooldown
+for a skipped fetch. Temporary raster misses send 404 with `Cache-Control: no-store`. Fresh cache hits
+keep their existing TTL.
+
+The breaker groups requests by source cache name and requested HTTP(S) origin, including scheme and port.
+Different mirror origins have separate circuits. Requests still select one mirror at a time. After the
+open period, one worker probes upstream. A temporary failure reopens the circuit. A usable response or a
+permanent 4xx closes it. Breaker-enabled HTTP fetches default to a 30-second Guzzle transport timeout.
+An explicit `upstreamHttp.timeout` must be finite and at least 0.001 seconds.
+
+The timeout applies per transfer with cURL. Redirects can each use that budget. The PHP stream handler
+can continue reading as long as response bytes arrive within its I/O timeout. The probe holds its lock
+until the fetch and validation finish. The probe can therefore take longer than 30 seconds.
+Use cURL and set `upstreamHttp.allow_redirects` to `false` to limit a probe to one timed transfer.
+
+State lives in the reserved `.upstream-circuits` directory under `cacheServerPath`. Workers sharing it
+need synchronized clocks, compatible filesystem permissions, and working cross-worker `flock()` on the
+same filesystem. Keep state and probe lock files in place while workers are running. If circuit storage fails,
+upstream fetches continue and a warning is emitted through the configured logger. The logger also warns
+when the circuit opens, reopens, or recovers. Skipped requests do not each generate a warning.
+
+#### Caching upstream tile 404s
+
+Set `cacheServer404Ttl` or `cacheBrowser404Ttl` on a raster source or named Mapbox style to enable
+explicit caching of upstream HTTP 404s for its raster or vector tiles. Both settings are non-negative
+integer seconds. When the policy is enabled, each omitted setting defaults to zero.
+
+* `cacheServer404Ttl` stores a timestamp for the missing tile. Zero lets the next eligible request retry
+  upstream. The raster proxy uses its existing tile metadata. The Mapbox proxy uses an asset sidecar.
+* `cacheBrowser404Ttl` caps the browser TTL for a stale tile or a raster composite affected by the 404.
+  For a missing tile, a positive value sends `Cache-Control: public, max-age=...` and `Expires`.
+  Zero sends `Cache-Control: no-store` on the missing response. When the server TTL is positive, the browser
+  TTL is capped by the remaining server cooldown. A vector 404 also respects the TTL cap of any stale
+  style or TileJSON it used. If a refresh lock is busy, the proxy applies any active cooldown and
+  its corresponding browser TTL. With no active cooldown and the 404 policy enabled, stale tile
+  bytes are sent with `max-age=0`. The HTTP sender caps very large browser TTLs to the latest
+  representable HTTP date.
+
+Stale tile bytes can still be served and retain their age. Missing responses have no Last-Modified header
+and cannot produce a 304. Raster errors other than an upstream 404 use their usual cooldowns and send
+`no-store` if they leave the final tile absent. The policy applies only to tiles, so missing styles,
+TileJSON, sprites, glyphs and fonts use their regular failure handling.
+Omit both options to keep the existing 404 behavior, including the raster `cacheServer4xxTtl` cooldown.
 
 ### Raster cache retention
 
@@ -474,6 +526,40 @@ Generated asset routes use the same base path:
 /map-assets/sprites/{styleName}/{encodedSpriteUrl}.png
 /map-assets/glyphs/{styleName}/{encodedGlyphTemplate}/{fontstack}/{range}.pbf
 ```
+
+### Mapbox upstream failures
+
+Set `"upstreamFailureCache": {}` on a named style to enable per-asset retry cooldowns. The object accepts
+`cacheServer4xxTtl` (default 3600 seconds), `cacheServer5xxTtl` (default 300 seconds) and
+`cacheBrowserTtlFail` (default 300 seconds). These are non-negative integers. Zero disables the corresponding
+server cooldown or makes stale client responses immediately stale.
+
+A temporary failure serves stale bytes with the shorter browser TTL. The cap also applies when a stale
+style or TileJSON document was used to resolve another asset. If no stale bytes are available, the proxy
+returns HTTP 503 with `Cache-Control: no-store` and includes `Retry-After` when a per-asset temporary
+cooldown is recorded. Permanent 4xx responses keep the existing stale fallback
+and cold-asset error behavior. Enabled refreshes share up to 256 stable lock files per cache root and
+use the root `cacheLockTimeout`. Assets assigned to the same lock may wait for each other. An unavailable
+lock serves stale data or returns 503. Failed cache writes are logged and the response can still be served.
+This also applies to a style that only enables the vector tile 404 policy. Workers sharing that cache
+need compatible permissions and cross-worker `flock()`.
+
+The raster cache pruner leaves Mapbox payloads, locks and retry metadata in place. Each distinct failed
+asset with a nonzero cooldown can leave one sidecar. Remove unused Mapbox entries separately with all
+workers for that cache stopped.
+
+The same [circuit breaker settings](#circuit-breaker) can be enabled on a named style. Assets on the same
+requested origin within that style share a circuit. The breaker can be enabled independently of the
+per-asset cooldowns.
+
+Styles with a circuit breaker or per-asset failure cache validate refreshes and existing cache entries.
+A refresh must be HTTP 200 with a usable body. Style and TileJSON references must pass the same policy
+and rewrites used by the routes, and the resulting documents must serialize successfully. Vector sources
+need usable tile templates or a TileJSON URL. Sprite indexes and PNGs must have the expected structure
+and format. Fontsource CSS must contain the configured faces and subsets. A rejected refresh leaves
+usable stale bytes in place. Unusable cached entries are treated as misses. The vector 404 policy by itself
+applies only to tile responses. With these options omitted, Mapbox retains its existing per-route checks
+and warm cache path.
 
 ### Web fonts for OpenLayers
 

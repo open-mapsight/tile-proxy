@@ -46,11 +46,16 @@ final class FileLock
                     throw new RuntimeException('Could not open lock file "' . $path . '"');
                 }
             } else {
-                if (flock($handle, LOCK_EX | LOCK_NB) && self::isCurrentFile($handle, $path)) {
+                $wouldBlock = 0;
+                $locked = @flock($handle, LOCK_EX | LOCK_NB, $wouldBlock);
+                if ($locked && self::isCurrentFile($handle, $path)) {
                     return new self($handle);
                 }
 
                 fclose($handle);
+                if (!$locked && !$wouldBlock && $create) {
+                    throw new RuntimeException('Could not lock file "' . $path . '"');
+                }
             }
 
             $remaining = $deadline - hrtime(true) / 1e9;
@@ -60,6 +65,23 @@ final class FileLock
 
             usleep((int)min(50000, ceil($remaining * 1e6)));
         } while (true);
+    }
+
+    /** Wait for a lock file that is never replaced or removed while workers use it. */
+    public static function acquireStable(string $path): self
+    {
+        Utils::mkdirp(dirname($path));
+        $handle = @fopen($path, 'c+b');
+        if ($handle === false) {
+            throw new RuntimeException('Could not open lock file "' . $path . '"');
+        }
+
+        if (!@flock($handle, LOCK_EX)) {
+            fclose($handle);
+            throw new RuntimeException('Could not lock file "' . $path . '"');
+        }
+
+        return new self($handle);
     }
 
     /** @param resource $handle */

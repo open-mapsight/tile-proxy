@@ -32,6 +32,21 @@ class DiskCacheTest extends TestCase
         $this->assertNull(DiskCache::readFresh($path, 60));
     }
 
+    public function testAtomicWriteReplacesFileWhileOpenReaderKeepsItsBytes(): void
+    {
+        $path = $this->tempDir . '/asset';
+        DiskCache::write($path, 'previous');
+        $reader = fopen($path, 'rb');
+        try {
+            DiskCache::writeAtomically($path, 'replacement');
+            self::assertSame('previous', stream_get_contents($reader));
+            self::assertSame('replacement', file_get_contents($path));
+            self::assertSame([], glob($this->tempDir . '/.write-*'));
+        } finally {
+            fclose($reader);
+        }
+    }
+
     protected function setUp(): void
     {
         $this->tempDir = sys_get_temp_dir() . '/disk_cache_test_' . uniqid();

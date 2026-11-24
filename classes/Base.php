@@ -57,7 +57,7 @@ class Base
         $meta = null;
         $metaSaved = false;
         try {
-            $meta = new Metadata($metadataPath);
+            $meta = new Metadata($metadataPath, $cfg['cacheServerPath'] ?? null);
 
             /** @var Result $res */
             $res = call_user_func(
@@ -97,7 +97,7 @@ class Base
     {
         $data = $res->getData();
         if ($data === null) {
-            return new HttpResponse(null, null, null, null);
+            return HttpResponse::missing($res->cacheBrowserTtlNotFound);
         }
 
         assert($res->mimeType !== null);

@@ -27,6 +27,15 @@ class MetadataTest extends TestCase
         $this->assertEquals('bar', $meta2->foo);
     }
 
+    public function testUserMetadataCanStillStoreCacheRootKey(): void
+    {
+        $meta = new Metadata($this->tempFile, '/cache');
+        $meta->cacheRoot = 'metadata value';
+        Metadata::save($meta);
+        self::assertSame('/cache', $meta->getCacheRoot());
+        self::assertSame('metadata value', (new Metadata($this->tempFile))->cacheRoot);
+    }
+
     public function testMetadataScope(): void
     {
         $meta = new Metadata($this->tempFile);

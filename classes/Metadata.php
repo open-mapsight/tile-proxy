@@ -8,8 +8,16 @@ class Metadata
     private mixed $data = null;
     private bool $isDirty = false;
 
-    public function __construct(private readonly ?string $filepath)
+    public function __construct(
+        private readonly ?string $filepath,
+        private readonly ?string $cacheRoot = null,
+    ) {
+    }
+
+    /** @internal */
+    public function getCacheRoot(): ?string
     {
+        return $this->cacheRoot;
     }
 
     public static function save(self $self): void

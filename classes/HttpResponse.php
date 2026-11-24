@@ -7,14 +7,23 @@ use Throwable;
 
 class HttpResponse
 {
+    private const LAST_HTTP_DATE_TIMESTAMP = 253402300799; // 9999-12-31 23:59:59 UTC
+
     public function __construct(
         public readonly ?string $body,
         public readonly ?string $mimeType,
         public readonly ?int    $cacheBrowserTtl,
         public readonly ?int    $cacheMTime,
         public readonly bool    $notModified = false,
+        public readonly ?int    $statusCode = null,
+        public readonly ?int    $retryAfter = null,
     )
     {
+    }
+
+    public static function missing(?int $browserTtl): self
+    {
+        return new self(null, null, $browserTtl, null, statusCode: 404);
     }
 
     public function isNotFound(): bool
@@ -47,19 +56,24 @@ class HttpResponse
     {
         if ($response->isNotFound()) {
             header('HTTP/1.0 404 Not Found', true, 404);
+            if ($response->statusCode === 404) {
+                self::sendCacheHeaders($response->cacheBrowserTtl, true);
+            }
             echo 'tile not found';
             return;
         }
 
         assert($response->mimeType !== null);
 
-        $time = time();
+        if ($response->statusCode !== null) {
+            http_response_code($response->statusCode);
+        }
 
         header('Content-Type: ' . $response->mimeType);
 
-        if ($response->cacheBrowserTtl !== null) {
-            header('Expires: ' . gmdate('D, d M Y H:i:s', $time + $response->cacheBrowserTtl) . ' GMT');
-            header('Cache-Control: public, max-age=' . $response->cacheBrowserTtl);
+        self::sendCacheHeaders($response->cacheBrowserTtl, $response->statusCode === 503);
+        if ($response->retryAfter !== null) {
+            header('Retry-After: ' . $response->retryAfter);
         }
 
         if ($response->cacheMTime !== null) {
@@ -74,5 +88,18 @@ class HttpResponse
         assert($response->body !== null);
         header('Content-Length: ' . strlen($response->body));
         echo $response->body;
+    }
+
+    private static function sendCacheHeaders(?int $ttl, bool $noStoreAtZero): void
+    {
+        if ($ttl === 0 && $noStoreAtZero) {
+            header('Cache-Control: no-store');
+        } elseif ($ttl !== null) {
+            $now = time();
+            $latest = min(PHP_INT_MAX, self::LAST_HTTP_DATE_TIMESTAMP);
+            $ttl = min($ttl, $latest - $now);
+            header('Expires: ' . gmdate('D, d M Y H:i:s', $now + $ttl) . ' GMT');
+            header('Cache-Control: public, max-age=' . $ttl);
+        }
     }
 }
